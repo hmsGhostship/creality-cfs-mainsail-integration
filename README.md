@@ -1,7 +1,8 @@
 # K1C CFS Mainsail Integration (CFS-C / Next-Gen Patch)
 
 > ℹ️ **This is a fork of the original [HimAndRobot/creality-cfs-mainsail-integration](https://github.com/HimAndRobot/creality-cfs-mainsail-integration).**  
-> This specific repository includes a critical frontend patch to add full compatibility with newer 2025/2026 Creality printer revisions (using `nexusp` and the modern hardware architecture) where the legacy port `9999` socket is missing.
+> This specific repository includes a critical frontend patch to add full compatibility with newer 2025/2026 Creality printer revisions
+> (using `nexusp` and the modern hardware architecture) where the legacy port `9999` socket is missing.
 > ℹ️ Fork note: Based on HimAndRobot/creality-cfs-mainsail-integration, with a frontend patch by @hmsGhostship for 2025/2026 Creality printer revisions (bypassing port 9999).
 
 This project adds a simple CFS panel directly inside Mainsail or Fluidd on the Creality K1C.
@@ -36,13 +37,9 @@ If you previously removed the Creality Web Interface with Guilouz Helper Script 
 *Disclaimer: This software is provided "as is" without warranty of any kind. Use it at your own risk.*
 
 
-
 # K1C CFS Mainsail Integration
 
 This project adds a simple CFS panel directly inside Mainsail or Fluidd on the Creality K1C.
-
-![CFS panel preview](static/preview.png)
-
 It also includes a mobile app for editing CFS filaments and spool colors.
 
 ## Requirements

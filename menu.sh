@@ -24,6 +24,31 @@ CREALITY_WEB_SERVER="${CREALITY_WEB_SERVER:-/usr/bin/web-server}"
 CREALITY_WEB_SERVER_DISABLED="${CREALITY_WEB_SERVER_DISABLED:-/usr/bin/web-server.disabled}"
 CFS_SERVICE_MARKER="${CFS_SERVICE_MARKER:-$SCRIPT_DIR/.cfs-service-reactivated}"
 
+
+detect_model() {
+  # Standardmäßig gehen wir von einem normalen K1 aus
+  local detected="K1"
+  
+  if command -v get_sn_mac.sh > /dev/null 2>&1; then
+    # Versuche das Modell auszulesen
+    local get_model
+    get_model=$(get_sn_mac.sh model 2>&1 || echo "")
+    
+    # Prüfe auf die 2025er Modellvariante
+    if [ -z "$get_model" ] && get_sn_mac.sh model_str 2>&1 | grep -iq 'K1'; then
+      detected="K1_2025"
+    elif echo "$get_model" | grep -iq "K1"; then
+      detected="K1"
+    else
+      printf 'Warning: Unknown hardware profile, treating as standard K1\n' >&2
+    fi
+  fi
+  
+  # Rückgabe des erkannten Modells
+  printf '%s' "$detected"
+}
+
+
 die() {
   printf '%s\n' "$1" >&2
   exit 1
@@ -381,11 +406,19 @@ choose_targets() {
 }
 
 show_menu() {
+  # Modell einmalig für den Menüaufruf bestimmen
+  MODEL_TYPE="$(detect_model)"
+
   printf '\n'
-  printf 'K1C CFS Mainsail Injection\n'
+  printf 'K1C CFS Mainsail Injection (Modell: %s)\n' "$MODEL_TYPE"
   printf '1. Install\n'
   printf '2. Remove\n'
-  printf '3. Reactivate CFS Service\n'
+  
+  # Zeige diesen Punkt NUR, wenn es kein K1_2025 Modell ist
+  if [ "$MODEL_TYPE" != "K1_2025" ]; then
+    printf '3. Reactivate CFS Service\n'
+  fi
+  
   printf '4. Update\n'
   printf 'Q. Quit\n'
   printf '> '
@@ -395,6 +428,10 @@ main() {
   while :; do
     show_menu
     read -r choice || exit 0
+    
+    # Erzwinge das Modell-Update für die Abfrage der Eingabe
+    MODEL_TYPE="$(detect_model)"
+    
     case "$choice" in
       '')
         ;;
@@ -405,7 +442,12 @@ main() {
         remove_installation
         ;;
       3)
-        reactivate_cfs_service
+        # Blockiere die Ausführung, falls die "3" trotz Ausblendung eingegeben wird
+        if [ "$MODEL_TYPE" = "K1_2025" ]; then
+          printf '\nInvalid option for this model.\n'
+        else
+          reactivate_cfs_service
+        fi
         ;;
       4)
         choose_targets update_local

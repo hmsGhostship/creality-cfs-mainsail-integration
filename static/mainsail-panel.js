@@ -296,23 +296,42 @@
     }
 
     const boxId = Number.isInteger(firstCfsBox.id) ? firstCfsBox.id : 1;
+
     (firstCfsBox.materials || []).forEach(function (material) {
       if (!material || typeof material !== "object") return;
       const materialIndex = material.id;
       if (!Number.isInteger(materialIndex) || materialIndex < 0 || materialIndex > 3) return;
+      
       const label = String(boxId) + SLOT_LETTERS[materialIndex];
       const rawState = Number(material.state || 0);
-      const name = String(material.name || "").trim();
+      let name = String(material.name || "").trim();
       const vendor = String(material.vendor || "").trim();
-      const materialType = String(material.type || "").trim().toUpperCase();
+      let materialType = String(material.type || "").trim().toUpperCase();
       const rfid = String(material.rfid || "").trim();
+      
+      // FIX: Wenn rawState === 1 (Manual), ist physisch eine Spule eingelegt!
+      const hardwareDetected = rawState === 1;
+      
       const rfidMissing = ["", "0", "00", "000", "0000", "00000", "000000"].indexOf(rfid) >= 0;
       const emptyManualSignature = rawState === 1 && rfidMissing && !name && !vendor &&
         ["", "-", "OTHER", "N/A", "NA", "NONE"].indexOf(materialType) >= 0;
-      const stateValue = emptyManualSignature ? 0 : rawState;
-      const present = stateValue > 0;
+      
+      let stateValue = emptyManualSignature ? 0 : rawState;
+      
+      // Eine Spule ist vorhanden, wenn ein gültiger State existiert ODER Hardware-Präsenz gemeldet wird
+      let present = stateValue > 0 || hardwareDetected;
+      
+      // Greift ein, wenn die Spule da ist, aber kein Typ zugeordnet wurde (dein Slot 1D!)
+      if (hardwareDetected && (stateValue === 0 || materialType === "" || materialType === "-1" || materialType === "NONE")) {
+          materialType = "UNASSIGNED";
+          name = "Please assign in Screen";
+          stateValue = 1; // Zwingt das UI in den aktiven Status
+          present = true;
+      }
+
       const color = present ? normalizeColorHex(material.color) : "";
       const temps = coerceTemperatureFields(material);
+      
       defaults[label] = {
         slot: label,
         box_id: boxId,
@@ -328,8 +347,8 @@
         manufacturer: String(material.vendor || "").trim(),
         material_db_id: inferMaterialDbId(materialType, vendor, name),
         color: color || "#d7dce4",
-        temp_min: normalizeTemperatureValue(temps[0]),
-        temp_max: normalizeTemperatureValue(temps[1]),
+        temp_min: normalizeTemperatureValue(temps),
+        temp_max: normalizeTemperatureValue(temps),
         used_material_length: normalizeTemperatureValue(material.usedMaterialLength),
         raw: material,
       };
@@ -343,6 +362,7 @@
       temp: firstCfsBox.temp,
     };
   }
+
 
   function sendJson(payload) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
@@ -1227,30 +1247,28 @@
   }
 
   function findDashboardColumn() {
-    const fluiddList = document.querySelector("main .app-draggable.list-group");
-    if (fluiddList) {
-      const fluiddCards = Array.from(fluiddList.querySelectorAll(".collapsable-card"));
-      const jobCard = fluiddCards.find(function (card) {
-        return !!card.querySelector("[role='tablist'], .v-tabs, .v-slide-group");
-      });
-      const anchorCard = jobCard || fluiddCards[0];
-      if (anchorCard) return { column: fluiddList, after: anchorCard };
-    }
-    const consoleCard = document.querySelector("main .miniconsole-panel");
-    if (consoleCard) {
-      const col = consoleCard.closest(".col");
-      if (col) return { column: col, after: consoleCard };
-    }
+    // PRIORITÄT 1: Sucht nach den Temperaturen -> CFS dockt sich direkt DARUNTER an
     const temperaturesCard = document.querySelector("main .temperature-panel");
     if (temperaturesCard) {
       const col = temperaturesCard.closest(".col");
       if (col) return { column: col, after: temperaturesCard };
     }
+
+    // PRIORITÄT 2: Nur wenn es keine Temperaturen gibt, wird die Konsole genommen
+    const consoleCard = document.querySelector("main .miniconsole-panel");
+    if (consoleCard) {
+      const col = consoleCard.closest(".col");
+      if (col) return { column: col, after: consoleCard };
+    }
+
+    // PRIORITÄT 3: Makros
     const macrosCard = document.querySelector("main .macros-panel");
     if (macrosCard) {
       const col = macrosCard.closest(".col");
       if (col) return { column: col, after: macrosCard };
     }
+
+    // Restlicher Fallback
     const firstPanel = document.querySelector("main .v-card.panel");
     if (firstPanel) {
       const col = firstPanel.closest(".col");
@@ -1258,6 +1276,7 @@
     }
     return null;
   }
+
 
   function mountInDashboard() {
     if (!isDashboardRoute()) {
@@ -1356,6 +1375,14 @@
       if (!dbData.result || !dbData.result.value || !dbData.result.value.T1) return;
       if (!klipperData.result || !klipperData.result.status || !klipperData.result.status.idle_timeout) return;
 
+      // ➔ REPRÄSENTATIVER FIX FÜR VUE.JS: 
+      // Jedes Mal, wenn neue Live-Daten reinkommen, erzwingen wir die Überschrift auf der Karte!
+      // Das überschreibt den sturen Vue-Template-Wert dauerhaft.
+      const panelTitle = document.querySelector(".k1c-cfs-panel-card .v-card__title span, .k1c-cfs-panel-card .v-toolbar__title, .k1c-cfs-panel-card h2");
+      if (panelTitle && panelTitle.textContent !== "CFS-C") {
+        panelTitle.textContent = "CFS-C";
+      }
+
       const boxes = dbData.result.value;
       const currentFilamentState = boxes.T1.filament || "";
       const klipperState = klipperData.result.status.idle_timeout.state || "";
@@ -1372,7 +1399,7 @@
       // 2. COMPLETION TRIGGER (Once Klipper returns to a stable "Ready" state)
       if (cfsIsMoving && klipperState === "Ready") {
         
-         // We determine whether the action was successful, based on the original state of the add-on
+        // We determine whether the action was successful, based on the original state of the add-on
         // pendingAction keeps track of whether we pressed "feed" or "retract"
         const currentAction = (pendingAction && pendingAction.type) ? pendingAction.type : "";
         let isActionDone = false;

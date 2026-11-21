@@ -1,5 +1,12 @@
 # K1C CFS Mainsail Integration (CFS-C / Next-Gen Patch)
 
+
+## ✨ K1 2025 (CFS-C & Spool Holder) Fork Enhancements (@hmsGhostship)
+* **5-State Filament & Buffer Logic:** Accurate real-time state handling across `Empty`, `Loaded in Hub`, `Loaded to Extruder`, `Spool Holder Active`, and `Printing / Feeding`.
+* **Automatic Material & Purge Temperature Sync:** Pulls active material temperatures (`extrude_temp` / `nozzle_temperature`) directly from the selected CFS-C slot or Spool Holder profile for load, unload, and purge operations.
+* **Spool Holder Mode (Non-CFS / Fallback):** Dedicated spool holder slot support when printing without CFS-C or using the external spool holder alongside CFS-C.
+* **Hardware & Sensor Detection:** Live integration with toolhead filament sensors (DXC / extruder) and FLY-LLL Plus buffer/safety sensors.
+
 > ℹ️ **Fork Note:** This is a fork of the original repository [HimAndRobot/creality-cfs-mainsail-integration](https://github.com).  
 > This specific repository includes a critical frontend patch by **@hmsGhostship** to add full compatibility with newer 2025/2026 Creality printer revisions (using `nexusp` and the modern hardware architecture) where the legacy port `9999` socket is missing.
 

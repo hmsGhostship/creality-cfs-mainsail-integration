@@ -44,7 +44,7 @@ Before installing, ensure your printer meets the following prerequisites:
 Connect to your printer via SSH and execute the following commands:
 
 ```sh
-git clone https://github.com /usr/data/creality-cfs-mainsail-integration
+git clone https://github.com/hmsGhostship/creality-cfs-mainsail-integration.git /usr/data/creality-cfs-mainsail-integration
 cd /usr/data/creality-cfs-mainsail-integration
 chmod +x ./menu.sh
 ./menu.sh

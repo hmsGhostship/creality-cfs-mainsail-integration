@@ -14,7 +14,8 @@
 
 This project integrates a simple, compact CFS panel directly inside the **Mainsail** or **Fluidd** interface on the Creality K1C.
 
-![CFS panel preview](static/preview.png)
+<img width="650" height="494" alt="grafik" src="https://github.com/user-attachments/assets/b70c382e-b70c-44aa-a0ba-0331b38d9f99" />
+
 
 ---
 

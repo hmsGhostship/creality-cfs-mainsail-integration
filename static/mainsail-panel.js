@@ -57,6 +57,11 @@
   let ws = null;
   let reconnectTimer = null;
   let latestSlots = [];
+  let hasCfsBox = false;
+  let lllSensorInstalled = false;
+  let lllFilamentDetected = false;
+  let extFilamentDetected = false;
+  let nexuspPaused = false;
   let latestConnected = false;
   let latestHumidity = null;
   let latestTemp = null;
@@ -84,7 +89,7 @@
       ".k1c-cfs-badge svg{width:15px;height:15px;fill:currentColor;opacity:.95}",
       ".k1c-cfs-badge.humidity{color:#77a7ff;background:#232323;box-shadow:inset 0 1px 0 rgba(255,255,255,.02)}",
       ".k1c-cfs-badge.temperature{color:#f7b955;background:#232323;box-shadow:inset 0 1px 0 rgba(255,255,255,.02)}",
-      ".k1c-cfs-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}",
+      ".k1c-cfs-holder-wrap{display:flex;justify-content:center;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)}.k1c-cfs-holder-wrap .k1c-cfs-item{width:min(280px,100%)}.k1c-cfs-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}",
       ".k1c-cfs-item{position:relative;background:#242424;border:1px solid #3a3a3a;border-radius:8px;padding:14px;display:flex;justify-content:space-between;align-items:center;gap:12px;cursor:pointer;transition:background .2s ease,border-color .2s ease}",
       ".k1c-cfs-item:hover{background:#2e2e2e}",
       ".k1c-cfs-item.active{background:#2a2a2a;border-color:var(--spool-color,#666)}",
@@ -287,6 +292,9 @@
       return box && typeof box === "object" && box.type === 0;
     });
 
+    if (firstCfsBox && typeof firstCfsBox === "object") {
+      hasCfsBox = true;
+    }
     if (!firstCfsBox || typeof firstCfsBox !== "object") {
       return {
         slots: SLOT_LETTERS.map(function (letter) { return defaults["1" + letter]; }),
@@ -309,7 +317,7 @@
       let materialType = String(material.type || "").trim().toUpperCase();
       const rfid = String(material.rfid || "").trim();
       
-      // FIX: Wenn rawState === 1 (Manual), ist physisch eine Spule eingelegt!
+      // FIX: When rawState === 1 (Manual), a spool is physically loaded!
       const hardwareDetected = rawState === 1;
       
       const rfidMissing = ["", "0", "00", "000", "0000", "00000", "000000"].indexOf(rfid) >= 0;
@@ -318,10 +326,10 @@
       
       let stateValue = emptyManualSignature ? 0 : rawState;
       
-      // Eine Spule ist vorhanden, wenn ein gültiger State existiert ODER Hardware-Präsenz gemeldet wird
+      // A spool is present if a valid state exists OR hardware presence is reported
       let present = stateValue > 0 || hardwareDetected;
       
-      // Greift ein, wenn die Spule da ist, aber kein Typ zugeordnet wurde (dein Slot 1D!)
+      // Applies when a spool is present without an assigned filament type (e.g. Slot 1D)
       if (hardwareDetected && (stateValue === 0 || materialType === "" || materialType === "-1" || materialType === "NONE")) {
           materialType = "UNASSIGNED";
           name = "Please assign in Screen";
@@ -354,10 +362,51 @@
       };
     });
 
+    const holderBox = materialBoxes.find(function (box) {
+      return box && typeof box === "object" && box.type === 1;
+    });
+    const holderMat = holderBox && Array.isArray(holderBox.materials) && holderBox.materials ? holderBox.materials : {};
+    let cachedHolder = null;
+    try { cachedHolder = JSON.parse(window.localStorage.getItem("k1c_cfs_holder_cache") || "null"); } catch (e) {}
+    const hTypeRaw = String(holderMat.type || (cachedHolder && cachedHolder.type) || "").trim().toUpperCase();
+    const hNameRaw = String(holderMat.name || (cachedHolder && cachedHolder.name) || "").trim();
+    const hVendorRaw = String(holderMat.vendor || (cachedHolder && cachedHolder.vendor) || "").trim();
+    const hHasMat = hTypeRaw !== "" && hTypeRaw !== "NONE" && hTypeRaw !== "-1";
+    const hColor = hHasMat ? normalizeColorHex(holderMat.color || (cachedHolder && cachedHolder.color)) : "";
+    const hTemps = coerceTemperatureFields(holderMat);
+    const hPresent = lllSensorInstalled ? lllFilamentDetected : true;
+    const anyCfsSelected = SLOT_LETTERS.some(function (l) {
+      const d = defaults[String(boxId) + l] || defaults["1" + l];
+      return d && d.selected;
+    });
+    const hLoaded = hPresent && extFilamentDetected && !anyCfsSelected;
+    const holderSlot = {
+      slot: "EXT",
+      display_label: "Spool Holder",
+      is_holder: true,
+      box_id: holderBox && Number.isInteger(holderBox.id) ? holderBox.id : 0,
+      material_index: 0,
+      state: hPresent ? 1 : 0,
+      status: hPresent ? (hHasMat ? "Ready" : "Loaded") : "Empty",
+      present: hPresent,
+      selected: hLoaded || Number(holderMat.selected || 0) === 1,
+      rfid: String(holderMat.rfid || ""),
+      type: hPresent ? (hHasMat ? hTypeRaw : "External") : "Empty",
+      name: hHasMat ? hNameRaw : "",
+      vendor: hVendorRaw,
+      manufacturer: hVendorRaw,
+      material_db_id: hHasMat ? inferMaterialDbId(hTypeRaw, hVendorRaw, hNameRaw) : "",
+      color: (hPresent && hColor) ? hColor : "#64748b",
+      temp_min: normalizeTemperatureValue(hTemps),
+      temp_max: normalizeTemperatureValue(hTemps),
+      used_material_length: 0,
+      raw: holderMat,
+    };
+
     return {
-      slots: SLOT_LETTERS.map(function (letter) {
+      slots: [holderSlot].concat(SLOT_LETTERS.map(function (letter) {
         return defaults[String(boxId) + letter] || defaults["1" + letter];
-      }),
+      })),
       humidity: firstCfsBox.humidity,
       temp: firstCfsBox.temp,
     };
@@ -409,7 +458,7 @@
     }
 
     ws.onopen = function () {
-      latestConnected = true;
+      latestConnected = !!(ws && ws.readyState === WebSocket.OPEN);
       sendJson({ ModeCode: "heart_beat" });
       requestBoxsInfo();
       render(latestSlots, latestConnected);
@@ -556,6 +605,51 @@
 
   async function runSlotAction(slot, action, buttonEl) {
     if (!slot || !action || actionSlot) return;
+    if (slot.is_holder) {
+      actionSlot = slot.slot;
+      if (buttonEl) buttonEl.disabled = true;
+      render(latestSlots, latestConnected);
+      try {
+        const matKey = String(slot.type || "").trim().toUpperCase();
+        const preset = findPresetByTypeAndName(slot.type, slot.name) || MATERIAL_PRESETS[matKey] || null;
+        let purgeTemp = 0;
+        try {
+          const pData = await queryKlipperObject("cfs_material_db=purge_temps");
+          const pTemps = (pData && pData.result && pData.result.status && pData.result.status.cfs_material_db && pData.result.status.cfs_material_db.purge_temps) || {};
+          purgeTemp = Number(pTemps[matKey] || pTemps[String(slot.type || "").trim()] || 0) || 0;
+        } catch (e) {}
+        const targetTemp = purgeTemp || Number(slot.temp_max || slot.temp_min || (preset && preset.temp_max) || 240) || 240;
+        if (action === "feed") {
+          const gcode = [
+            "RESPOND MSG=\"Spool Holder: Heating nozzle to " + targetTemp + "C & extruding 60mm...\"",
+            "M109 S" + targetTemp,
+            "M83",
+            "G1 E60 F240",
+            "G92 E0",
+            "RESPOND MSG=\"Spool Holder: Feed / purge complete.\""
+          ].join("\n");
+          await runKlipperCommand(gcode);
+        } else if (action === "retract") {
+          const gcode = [
+            "RESPOND MSG=\"Spool Holder: Heating nozzle to " + targetTemp + "C & retracting from extruder...\"",
+            "M109 S" + targetTemp,
+            "M83",
+            "G1 E5 F200",
+            "G1 E-85 F600",
+            "G92 E0",
+            "M104 S0",
+            "RESPOND MSG=\"Spool Holder: Retracted from extruder! Press Retract once on FLY-LLL Plus to unload Bowden.\""
+          ].join("\n");
+          await runKlipperCommand(gcode);
+        }
+      } catch (error) {
+        window.alert("Spool Holder " + action + " failed: " + (error.message || String(error)));
+      } finally {
+        actionSlot = "";
+        render(latestSlots, latestConnected);
+      }
+      return;
+    }
     const currentSelectedSlot = latestSlots.find(function (item) { return item.selected; });
     const previousSelectedSlot = currentSelectedSlot ? currentSelectedSlot.slot : "";
     const actionKind = action === "retract"
@@ -575,13 +669,24 @@
         method: "set",
         params: {
           feedInOrOut: {
-            boxId: slot.box_id || 1,
+            boxId: typeof slot.box_id === "number" ? slot.box_id : 1,
             materialId: slot.material_index,
             isFeed: action === "feed" ? 1 : 0,
           },
         },
       };
-      if (!sendJson(payload)) throw new Error("WebSocket not connected");
+      if (slot.is_holder) {
+        try {
+          window.localStorage.setItem("k1c_cfs_holder_cache", JSON.stringify({
+            type: normalizedType, vendor: String(draft.vendor || "").trim(),
+            name: String(draft.name || "").trim(), color: String(draft.color || "").trim()
+          }));
+        } catch (e) {}
+      }
+      if (!sendJson(payload)) {
+        if (slot.is_holder) { closeModal(); return; }
+        throw new Error("WebSocket not connected");
+      }
       window.setTimeout(requestBoxsInfo, 300);
     } catch (error) {
       window.alert("Failed to run " + action + " on " + slot.slot + ": " + (error.message || String(error)));
@@ -608,7 +713,7 @@
         method: "set",
         params: {
           modifyMaterial: {
-            boxId: slot.box_id || 1,
+            boxId: typeof slot.box_id === "number" ? slot.box_id : 1,
             id: slot.material_index,
             rfid: resolvedRfid,
             type: normalizedType,
@@ -937,6 +1042,11 @@
     gridEl.className = "k1c-cfs-grid";
     shell.appendChild(gridEl);
 
+    const holderWrap = document.createElement("div");
+    holderWrap.id = "k1c-cfs-holder-wrap";
+    holderWrap.className = "k1c-cfs-holder-wrap";
+    shell.appendChild(holderWrap);
+
     const controls = document.createElement("div");
     controls.className = "k1c-cfs-controls";
     const controlsRow = document.createElement("div");
@@ -1068,10 +1178,55 @@
     return card;
   }
 
+  function buildStandaloneHolderSlot() {
+    let cachedHolder = null;
+    try { cachedHolder = JSON.parse(window.localStorage.getItem("k1c_cfs_holder_cache") || "null"); } catch (e) {}
+    const hTypeRaw = String((cachedHolder && cachedHolder.type) || "").trim().toUpperCase();
+    const hNameRaw = String((cachedHolder && cachedHolder.name) || "").trim();
+    const hVendorRaw = String((cachedHolder && cachedHolder.vendor) || "").trim();
+    const hHasMat = hTypeRaw !== "" && hTypeRaw !== "NONE" && hTypeRaw !== "-1";
+    const hColor = hHasMat ? normalizeColorHex(cachedHolder && cachedHolder.color) : "";
+    const hPresent = lllSensorInstalled ? lllFilamentDetected : true;
+    const anyCfsSelected = latestSlots.some(function (x) { return !x.is_holder && x.selected; });
+    const hLoaded = hPresent && extFilamentDetected && !anyCfsSelected;
+    return {
+      slot: "EXT",
+      display_label: "Spool Holder",
+      is_holder: true,
+      box_id: 0,
+      material_index: 0,
+      state: hPresent ? 1 : 0,
+      status: hPresent ? (hHasMat ? "Ready" : "Loaded") : "Empty",
+      present: hPresent,
+      selected: hLoaded,
+      rfid: "",
+      type: hPresent ? (hHasMat ? hTypeRaw : "External") : "Empty",
+      name: hHasMat ? hNameRaw : "",
+      vendor: hVendorRaw,
+      manufacturer: hVendorRaw,
+      material_db_id: hHasMat ? inferMaterialDbId(hTypeRaw, hVendorRaw, hNameRaw) : "",
+      color: (hPresent && hColor) ? hColor : "#64748b",
+      temp_min: 0,
+      temp_max: 0,
+      used_material_length: 0,
+      raw: {},
+    };
+  }
+
   function render(slots, connected) {
     if (!gridEl) return;
 
-    latestSlots = Array.isArray(slots) ? slots.slice() : [];
+    let incoming = Array.isArray(slots) ? slots.slice() : [];
+    if (!incoming.some(function (x) { return x && x.is_holder; })) {
+      const prevHolder = latestSlots.find(function (x) { return x && x.is_holder; });
+      incoming = [prevHolder || buildStandaloneHolderSlot()].concat(incoming);
+    }
+    if (!connected) {
+      incoming = incoming.map(function (x) {
+        return x.is_holder ? x : Object.assign({}, x, { present: false, selected: false, type: "Empty" });
+      });
+    }
+    latestSlots = incoming;
     latestConnected = !!connected;
 
     if (!selectedSlot || !latestSlots.some(function (slot) { return slot.slot === selectedSlot; })) {
@@ -1112,6 +1267,34 @@
     }
 
     gridEl.innerHTML = "";
+    if (hasCfsBox) {
+      if (nexuspPaused) {
+        const holderItem = latestSlots.find(function (x) { return x.is_holder; });
+        if (holderItem) selectedSlot = holderItem.slot;
+      } else if (selectedSlot === "HOLDER" || !latestSlots.some(function (x) { return x.slot === selectedSlot && x.present; })) {
+        const bestCfs = latestSlots.find(function (x) { return !x.is_holder && x.selected && x.present; })
+          || latestSlots.find(function (x) { return !x.is_holder && x.present; })
+          || latestSlots.find(function (x) { return !x.is_holder; });
+        if (bestCfs) selectedSlot = bestCfs.slot;
+      }
+    }
+    gridEl.style.display = hasCfsBox ? "" : "none";
+    const holderWrapEl = document.getElementById("k1c-cfs-holder-wrap");
+    if (holderWrapEl) {
+      holderWrapEl.innerHTML = "";
+      holderWrapEl.style.marginTop = hasCfsBox ? "10px" : "0";
+      holderWrapEl.style.paddingTop = hasCfsBox ? "10px" : "0";
+      holderWrapEl.style.borderTop = hasCfsBox ? "1px solid rgba(255,255,255,.08)" : "none";
+    }
+    const cardEl = document.getElementById(CARD_ID);
+    if (cardEl) {
+      cardEl.querySelectorAll(".k1c-cfs-badge").forEach(function (b) {
+        b.style.display = hasCfsBox ? "" : "none";
+      });
+      const titleEl = cardEl.querySelector(".v-card__title span, .v-toolbar__title");
+      if (titleEl && !hasCfsBox) titleEl.textContent = "Spool Holder";
+    }
+    if (configBtnEl) configBtnEl.style.display = hasCfsBox ? "" : "none";
 
     latestSlots.forEach(function (slot) {
       const item = document.createElement("div");
@@ -1135,10 +1318,10 @@
       info.className = "k1c-cfs-info";
       const channel = document.createElement("span");
       channel.className = "k1c-cfs-channel";
-      channel.textContent = "Channel " + slot.slot;
+      channel.textContent = slot.display_label || ("Channel " + slot.slot);
       const type = document.createElement("span");
       type.className = "k1c-cfs-type";
-      type.textContent = slot.present ? String(slot.type || "Unknown") : "Empty";
+      type.textContent = slot.is_holder ? String(slot.type || "Empty") : (slot.present ? String(slot.type || "Unknown") : "Empty");
       info.appendChild(channel);
       info.appendChild(type);
       main.appendChild(info);
@@ -1169,12 +1352,23 @@
         item.appendChild(dot);
       }
       item.appendChild(edit);
-      gridEl.appendChild(item);
+      if (slot.is_holder && holderWrapEl) {
+        holderWrapEl.appendChild(item);
+      } else {
+        gridEl.appendChild(item);
+      }
     });
     const isLoaded = !!(selectedSlotData && selectedSlotData.selected);
     const isPresent = !!(selectedSlotData && selectedSlotData.present);
+    const isHolderSelected = !!(selectedSlotData && selectedSlotData.is_holder);
+    const col1CollisionLock = !!(lllSensorInstalled && !nexuspPaused && lllFilamentDetected && !extFilamentDetected);
+    const holderReady = lllSensorInstalled
+      ? !!(isHolderSelected && nexuspPaused && lllFilamentDetected && extFilamentDetected)
+      : !!(isHolderSelected && nexuspPaused && extFilamentDetected);
+    const matrixBlock = isHolderSelected ? !holderReady : col1CollisionLock;
     if (feedBtnEl) {
-      feedBtnEl.disabled = actionLocked || !!actionSlot || isLoaded || !isPresent;
+      const allowHolderFeed = holderReady;
+      feedBtnEl.disabled = actionLocked || !!actionSlot || matrixBlock || (!allowHolderFeed && isLoaded) || !isPresent;
       var feedIconEl = feedBtnEl.querySelector("svg");
       var feedTextEl = feedBtnEl.querySelector("span");
       var externalFeedPending = !!pendingAction
@@ -1186,18 +1380,70 @@
         if (externalFeedPending) {
           feedTextEl.innerHTML = '<span class="k1c-cfs-action-loading"><span class="k1c-cfs-action-loading-dot"></span><span>Loading</span></span>';
         } else {
-          feedTextEl.textContent = (isPresent && currentLoadedSlotName && !isLoaded) ? "Switch" : "Feed";
+          feedTextEl.textContent = (selectedSlotData && selectedSlotData.is_holder) ? "Feed" : ((isPresent && currentLoadedSlotName && !isLoaded) ? "Switch" : "Feed");
         }
       }
     }
     if (configBtnEl) configBtnEl.disabled = actionLocked;
-    if (retractBtnEl) retractBtnEl.disabled = actionLocked || !!actionSlot || !isPresent;
+    if (retractBtnEl) retractBtnEl.disabled = actionLocked || !!actionSlot || matrixBlock || !isPresent;
 
     updateStatus(connected);
     updateHumidity(latestHumidity, latestTemp);
   }
 
+  async function pollHolderSensors() {
+    try {
+      const res = await queryKlipperObject("filament_switch_sensor%20lll_plus_sensor&filament_switch_sensor%20filament_sensor&gcode_macro%20_LLL_WATCHER_STATE");
+      const st = (res && res.result && res.result.status) || {};
+      const hasLll = Object.prototype.hasOwnProperty.call(st, "filament_switch_sensor lll_plus_sensor");
+      const lllDet = hasLll ? !!st["filament_switch_sensor lll_plus_sensor"].filament_detected : false;
+      const extDet = Object.prototype.hasOwnProperty.call(st, "filament_switch_sensor filament_sensor")
+        ? !!st["filament_switch_sensor filament_sensor"].filament_detected
+        : false;
+      const hasWatcher = Object.prototype.hasOwnProperty.call(st, "gcode_macro _LLL_WATCHER_STATE");
+      const nPaused = hasWatcher
+        ? (Number(st["gcode_macro _LLL_WATCHER_STATE"].nexusp_paused) === 1)
+        : true;
+      if (hasLll !== lllSensorInstalled || lllDet !== lllFilamentDetected || extDet !== extFilamentDetected || nPaused !== nexuspPaused) {
+        const wasPaused = nexuspPaused;
+        lllSensorInstalled = hasLll;
+        lllFilamentDetected = lllDet;
+        extFilamentDetected = extDet;
+        nexuspPaused = nPaused;
+        if (wasPaused && !nexuspPaused && selectedSlot === "HOLDER") {
+          const firstCfs = latestSlots.find(function (x) { return !x.is_holder && x.present; }) || latestSlots.find(function (x) { return !x.is_holder; });
+          if (firstCfs) selectedSlot = firstCfs.slot;
+        }
+        let cachedHolder = null;
+        try { cachedHolder = JSON.parse(window.localStorage.getItem("k1c_cfs_holder_cache") || "null"); } catch (e) {}
+        const cType = String((cachedHolder && cachedHolder.type) || "").trim().toUpperCase();
+        const cColor = cType ? normalizeColorHex(cachedHolder && cachedHolder.color) : "";
+        const baseList = latestSlots.some(function (x) { return x.is_holder; })
+          ? latestSlots
+          : [buildStandaloneHolderSlot()].concat(latestSlots);
+        latestSlots = baseList.map(function (item) {
+          if (!item.is_holder) return item;
+          const hPresent = lllSensorInstalled ? lllFilamentDetected : true;
+          const anyCfs = baseList.some(function (x) { return !x.is_holder && x.selected; });
+          const hLoaded = hPresent && extFilamentDetected && !anyCfs;
+          const knownType = (item.type && item.type !== "Empty" && item.type !== "External") ? item.type : cType;
+          const hasMat = knownType !== "";
+          return Object.assign({}, item, {
+            present: hPresent,
+            state: hPresent ? 1 : 0,
+            status: hPresent ? (hasMat ? "Ready" : "Loaded") : "Empty",
+            selected: hLoaded,
+            type: hPresent ? (hasMat ? knownType : "External") : "Empty",
+            color: (hPresent && (cColor || (item.color && item.color !== "#64748b"))) ? (cColor || item.color) : "#64748b",
+          });
+        });
+        render(latestSlots, latestConnected);
+      }
+    } catch (e) {}
+  }
+
   function poll() {
+    pollHolderSensors();
     if (latestConnected) requestBoxsInfo();
     else connectWs();
   }
@@ -1211,7 +1457,7 @@
       if (latestConnected) sendJson({ ModeCode: "heart_beat" });
     }, HEARTBEAT_MS);
 
-    // DIESE ZEILE HIER HINZUFÜGEN: Startet den CFS-C Takt im Hintergrund
+    // ADD THIS LINE HERE: Starts the CFS-C polling loop in the background
     window.setInterval(pollCfsCStatus, 2000);
   }
 
@@ -1247,36 +1493,32 @@
   }
 
   function findDashboardColumn() {
-    // PRIORITÄT 1: Sucht nach den Temperaturen -> CFS dockt sich direkt DARUNTER an
-    const temperaturesCard = document.querySelector("main .temperature-panel");
-    if (temperaturesCard) {
-      const col = temperaturesCard.closest(".col");
-      if (col) return { column: col, after: temperaturesCard };
+    // 1. MAINSAlL PFAD: Sucht die bekannte Klasse
+    const mainsailTemp = document.querySelector("main .temperature-panel");
+    if (mainsailTemp) {
+      const col = mainsailTemp.closest(".col");
+      if (col) return { column: col, after: mainsailTemp };
     }
 
-    // PRIORITÄT 2: Nur wenn es keine Temperaturen gibt, wird die Konsole genommen
-    const consoleCard = document.querySelector("main .miniconsole-panel");
-    if (consoleCard) {
-      const col = consoleCard.closest(".col");
-      if (col) return { column: col, after: consoleCard };
+    // 2. FLUIDD PATH: Search for EVERY card on the dashboard that contains a chart.
+    // Da die Temperaturen die einzige Karte mit einem Diagramm im Hauptbereich sind, greift das unfehlbar!
+    const fluiddChartCard = document.querySelector("main .f-card:has(.apexcharts-canvas)") || 
+                            document.querySelector("main .v-card:has(canvas)") ||
+                            document.querySelector("main .f-card:has(canvas)");
+                            
+    if (fluiddChartCard) {
+      const col = fluiddChartCard.closest(".col, .v-col, .flex-column, [class*='col']");
+      if (col) return { column: col, after: fluiddChartCard };
     }
 
-    // PRIORITÄT 3: Makros
-    const macrosCard = document.querySelector("main .macros-panel");
-    if (macrosCard) {
-      const col = macrosCard.closest(".col");
-      if (col) return { column: col, after: macrosCard };
+    // 3. BOMBENFESTER FALLBACK: Die mittlere/erste Spalte im Grid
+    const firstColumn = document.querySelector("main .col, main .v-col");
+    if (firstColumn) {
+      return { column: firstColumn, after: null };
     }
 
-    // Restlicher Fallback
-    const firstPanel = document.querySelector("main .v-card.panel");
-    if (firstPanel) {
-      const col = firstPanel.closest(".col");
-      if (col) return { column: col, after: firstPanel };
-    }
     return null;
   }
-
 
   function mountInDashboard() {
     if (!isDashboardRoute()) {
@@ -1364,8 +1606,8 @@
   let cfsIsMoving = false;
 
   function pollCfsCStatus() {
-    const urlDb = `http://${window.location.hostname}:7125/server/database/item?namespace=color_box&key=box_info`;
-    const urlKlipper = `http://${window.location.hostname}:7125/printer/objects/query?idle_timeout`;
+    const urlDb = "/server/database/item?namespace=color_box&key=box_info";
+    const urlKlipper = "/printer/objects/query?idle_timeout";
 
     Promise.all([
       fetch(urlDb).then(r => r.json()),
@@ -1373,11 +1615,15 @@
     ])
     .then(([dbData, klipperData]) => {
       if (!dbData.result || !dbData.result.value || !dbData.result.value.T1) return;
+      if (!hasCfsBox) {
+        hasCfsBox = true;
+        render(latestSlots, latestConnected);
+      }
       if (!klipperData.result || !klipperData.result.status || !klipperData.result.status.idle_timeout) return;
 
-      // ➔ REPRÄSENTATIVER FIX FÜR VUE.JS: 
-      // Jedes Mal, wenn neue Live-Daten reinkommen, erzwingen wir die Überschrift auf der Karte!
-      // Das überschreibt den sturen Vue-Template-Wert dauerhaft.
+      // -> REACTIVE FIX FOR VUE.JS: 
+      // Whenever new live data arrives, enforce the card title!
+      // This permanently overrides the stubborn Vue template value.
       const panelTitle = document.querySelector(".k1c-cfs-panel-card .v-card__title span, .k1c-cfs-panel-card .v-toolbar__title, .k1c-cfs-panel-card h2");
       if (panelTitle && panelTitle.textContent !== "CFS-C") {
         panelTitle.textContent = "CFS-C";

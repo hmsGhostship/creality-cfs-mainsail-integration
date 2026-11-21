@@ -58,17 +58,11 @@ chmod +x ./menu.sh
 
 ---
 
-## ⚠️ Important Note for Older Hardware (Pre-2025 Models Only)
+## ⚠️ Compatibility Note (Creality K1 2025 / K1C 2025)
+* **Tested Firmware:** Creality Firmware **`1.1.0.27`** (K1 2025 Series).
+* **Architecture Difference:** Unlike older pre-2025 K1 models (which used `/usr/bin/web-server` on port `9999`), 2025 models communicate via **`nexusp` (`CS56nexusp_service`)** and Klipper `box.cfg`—and also work without a CFS-C unit in **Spool Holder Mode**.
+* **Recommended Installation:** Use the full [Creality Helper Script 2025 (CFS-C)](https://github.com/hmsGhostship/Creality-Helper-Script-2025) for one-click installation, backup/restore, and hardware sensor integration.
 
-> 🛑 **Applies ONLY to legacy printer revisions (built before 2025):**
-> If you previously removed the stock Creality Web Interface using Guilouz's Helper Script, the background CFS data socket on port `9999` (`/usr/bin/web-server`) might be disabled. As a result, the CFS panel will load but won't show any information.
->
-> **Solution for legacy models:**
-> 1. Run the script menu again (`./menu.sh`).
-> 2. Press `3` for **Reactivate CFS Service**. *Note: This option is hidden/unnecessary if your printer is a 2025+ generation model.*
-> 3. Wait for the process to complete, then refresh Mainsail or Fluidd. This safely wakes up the background CFS daemon without restoring the rest of the heavy Creality stock UI.
-
----
 
 ## 🔄 Updates & Removal
 

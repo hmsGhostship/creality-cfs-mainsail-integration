@@ -187,6 +187,92 @@ deploy_local_panel() {
   fi
 }
 
+
+install_material_editor() {
+  if [ ! -f "$SCRIPT_DIR/material-editor/server.py" ]; then
+    return 0
+  fi
+  mkdir -p /usr/data/cfs-material-editor
+  cp -f "$SCRIPT_DIR/material-editor/server.py" /usr/data/cfs-material-editor/server.py
+  cp -f "$SCRIPT_DIR/material-editor/index.html" /usr/data/cfs-material-editor/index.html
+  cat << 'EOF_SVC' > /usr/apps/etc/init.d/S99cfs_material_editor
+#!/bin/sh
+PID_FILE="/var/run/cfs_material_editor.pid"
+PY_BIN="/usr/data/moonraker-env/bin/python"
+[ ! -x "$PY_BIN" ] && PY_BIN="$(command -v python3)"
+case "$1" in
+  start)
+    [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null && exit 0
+    "$PY_BIN" /usr/data/cfs-material-editor/server.py >/tmp/cfs_material_editor.log 2>&1 &
+    echo $! > "$PID_FILE"
+    ;;
+  stop)
+    [ -f "$PID_FILE" ] && kill "$(cat "$PID_FILE")" 2>/dev/null || true
+    rm -f "$PID_FILE"
+    ;;
+  restart)
+    "$0" stop
+    sleep 1
+    "$0" start
+    ;;
+esac
+EOF_SVC
+  chmod +x /usr/apps/etc/init.d/S99cfs_material_editor
+  /usr/apps/etc/init.d/S99cfs_material_editor restart >/dev/null 2>&1 || true
+
+  NGINX_CFG="/usr/data/nginx/nginx/nginx.conf"
+  if [ -f "$NGINX_CFG" ] && ! grep -q "location /cfs-gate/" "$NGINX_CFG"; then
+    cp -f "$NGINX_CFG" "${NGINX_CFG}.cfs_bak" 2>/dev/null || true
+    python3 - << 'PY_NGINX'
+p = "/usr/data/nginx/nginx/nginx.conf"
+s = open(p, "r", encoding="utf-8").read()
+anchor = "        location ~ ^/(printer|api|access|machine|server)/ {"
+block = (
+    "        location = /api/files/local {\n"
+    "            proxy_pass http://localhost:8088;\n"
+    "            proxy_set_header Host $http_host;\n"
+    "            proxy_set_header X-Real-IP $remote_addr;\n"
+    "            client_max_body_size 0;\n"
+    "        }\n\n"
+    "        location = /server/files/upload {\n"
+    "            proxy_pass http://localhost:8088;\n"
+    "            proxy_set_header Host $http_host;\n"
+    "            proxy_set_header X-Real-IP $remote_addr;\n"
+    "            client_max_body_size 0;\n"
+    "        }\n\n"
+    "        location /cfs-gate/ {\n"
+    "            proxy_pass http://localhost:8088;\n"
+    "            proxy_set_header Host $http_host;\n"
+    "        }\n\n" + anchor
+)
+if anchor in s:
+    open(p, "w", encoding="utf-8").write(s.replace(anchor, block))
+PY_NGINX
+    /usr/data/nginx/sbin/nginx -c "$NGINX_CFG" -s reload >/dev/null 2>&1 || true
+  fi
+}
+
+remove_material_editor() {
+  if [ -x /usr/apps/etc/init.d/S99cfs_material_editor ]; then
+    /usr/apps/etc/init.d/S99cfs_material_editor stop >/dev/null 2>&1 || true
+    rm -f /usr/apps/etc/init.d/S99cfs_material_editor
+  fi
+  rm -rf /usr/data/cfs-material-editor
+  NGINX_CFG="/usr/data/nginx/nginx/nginx.conf"
+  if [ -f "$NGINX_CFG" ] && grep -q "location /cfs-gate/" "$NGINX_CFG"; then
+    python3 - << 'PY_NGINX_RM'
+import re
+p = "/usr/data/nginx/nginx/nginx.conf"
+s = open(p, "r", encoding="utf-8").read()
+s = re.sub(r"\s*location = /api/files/local \{[^}]*\}", "", s)
+s = re.sub(r"\s*location = /server/files/upload \{[^}]*\}", "", s)
+s = re.sub(r"\s*location /cfs-gate/ \{[^}]*\}", "", s)
+open(p, "w", encoding="utf-8").write(s)
+PY_NGINX_RM
+    /usr/data/nginx/sbin/nginx -c "$NGINX_CFG" -s reload >/dev/null 2>&1 || true
+  fi
+}
+
 install_klipper_extra() {
   require_file "$KLIPPER_EXTRA_SOURCE"
   require_file "$KLIPPER_CFG_SOURCE"
@@ -288,6 +374,7 @@ install_local() {
   done
   printf 'Step 4: installing Klipper extra\n'
   install_klipper_extra
+  install_material_editor
   printf 'Step 5: updating printer config\n'
   ensure_printer_include
   printf '\nInstalled local mode.\n'
@@ -316,6 +403,7 @@ update_local() {
   printf 'Step 3: refreshing injected assets\n'
   rm -f "$MAINSAIL_PANEL_JS_TARGET" "$FLUIDD_PANEL_JS_TARGET" "$(dirname "$MAINSAIL_PANEL_JS_TARGET")/k1c-cfs-map.js" "$(dirname "$FLUIDD_PANEL_JS_TARGET")/k1c-cfs-map.js"
   rm -f "$KLIPPER_EXTRA_TARGET" "$KLIPPER_EXTRA_PYC_TARGET" "$KLIPPER_CFG_TARGET"
+  remove_material_editor
   for target in $targets; do
     deploy_local_panel "$target"
   done
@@ -325,6 +413,7 @@ update_local() {
   done
   printf 'Step 5: refreshing Klipper extra\n'
   install_klipper_extra
+  install_material_editor
   printf 'Step 6: validating printer config include\n'
   ensure_printer_include
   printf '\nUpdated local mode.\n'

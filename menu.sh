@@ -176,9 +176,15 @@ write_local_injected_file() {
 deploy_local_panel() {
   target="$1"
   panel_target="$(target_panel_js "$target")"
+  map_source="$SCRIPT_DIR/static/k1c-cfs-map.js"
+  map_target="$(dirname "$panel_target")/k1c-cfs-map.js"
   require_file "$PANEL_JS_SOURCE"
   cp "$PANEL_JS_SOURCE" "$panel_target"
   chmod 644 "$panel_target" || true
+  if [ -f "$map_source" ]; then
+    cp "$map_source" "$map_target"
+    chmod 644 "$map_target" || true
+  fi
 }
 
 install_klipper_extra() {
@@ -308,7 +314,7 @@ update_local() {
   done
   backup_printer_cfg_once
   printf 'Step 3: refreshing injected assets\n'
-  rm -f "$MAINSAIL_PANEL_JS_TARGET" "$FLUIDD_PANEL_JS_TARGET"
+  rm -f "$MAINSAIL_PANEL_JS_TARGET" "$FLUIDD_PANEL_JS_TARGET" "$(dirname "$MAINSAIL_PANEL_JS_TARGET")/k1c-cfs-map.js" "$(dirname "$FLUIDD_PANEL_JS_TARGET")/k1c-cfs-map.js"
   rm -f "$KLIPPER_EXTRA_TARGET" "$KLIPPER_EXTRA_PYC_TARGET" "$KLIPPER_CFG_TARGET"
   for target in $targets; do
     deploy_local_panel "$target"
@@ -358,7 +364,7 @@ remove_installation() {
   printf 'Step 4: removing local files\n'
   rm -f "$SCRIPT_DIR/.env" "$SCRIPT_DIR/run-local.sh"
   rm -rf "$SCRIPT_DIR/.k1c-cfs-mini"
-  rm -f "$MAINSAIL_PANEL_JS_TARGET" "$FLUIDD_PANEL_JS_TARGET"
+  rm -f "$MAINSAIL_PANEL_JS_TARGET" "$FLUIDD_PANEL_JS_TARGET" "$(dirname "$MAINSAIL_PANEL_JS_TARGET")/k1c-cfs-map.js" "$(dirname "$FLUIDD_PANEL_JS_TARGET")/k1c-cfs-map.js"
   rm -f "$KLIPPER_EXTRA_TARGET" "$KLIPPER_EXTRA_PYC_TARGET" "$KLIPPER_CFG_TARGET"
   printf 'Step 5: restoring previous CFS service state\n'
   if [ -f "$CFS_SERVICE_MARKER" ]; then

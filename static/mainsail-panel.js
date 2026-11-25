@@ -75,6 +75,7 @@
   let feedBtnEl = null;
   let retractBtnEl = null;
   let configBtnEl = null;
+  let dbBtnEl = null;
 
   if (!document.getElementById(STYLE_ID)) {
     const style = document.createElement("style");
@@ -217,27 +218,63 @@
     return matchedId;
   }
 
-  function findPresetByTypeAndName(type, name) {
-    const normalizedType = String(type || "").trim().toUpperCase();
-    const normalizedName = String(name || "").trim().toLowerCase();
-    let matchedPreset = null;
-    Object.keys(MATERIAL_PRESETS).some(function (presetKey) {
-      const preset = MATERIAL_PRESETS[presetKey];
-      if (presetMaterialType(presetKey) !== normalizedType) return false;
-      if (String(preset.name || "").trim().toLowerCase() !== normalizedName) return false;
-      matchedPreset = preset;
-      return true;
-    });
-    return matchedPreset;
-  }
+  let DB_PRESETS_BY_TYPE = null;
+  let DB_ALLOW_CF = false;
+  let DB_EDITOR_AVAILABLE = false;
+  window.__k1c_reload_mat_db = function loadLiveMaterialDb() {
+    var url = "http://" + window.location.hostname + ":8088/api/materials";
+    fetch(url).then(function (r) { return r.json(); }).then(function (data) {
+      if (!data || !data.ok || !Array.isArray(data.items)) return;
+      DB_ALLOW_CF = !!(data.settings && data.settings.allow_cf);
+      var grouped = {};
+      data.items.forEach(function (it) {
+        var t = String(it.type || "").trim().toUpperCase();
+        if (!t) return;
+        if (!DB_ALLOW_CF && (t.indexOf("-CF") !== -1 || t.indexOf("-GF") !== -1)) return;
+        if (!grouped[t]) grouped[t] = [];
+        var noz = parseInt(it.nozzle_temp, 10) || 215;
+        grouped[t].push({
+          db_id: String(it.id || ""),
+          rfid: String(it.id || ""),
+          vendor: String(it.brand || "Generic"),
+          name: String(it.name || ""),
+          display: (it.brand ? (it.brand + " - " + it.name) : it.name) + (it.custom ? " [Custom]" : ""),
+          temp_min: String(Math.max(170, noz - 15)),
+          temp_max: String(noz + 15),
+          custom: !!it.custom
+        });
+      });
+      Object.keys(grouped).forEach(function (k) {
+        grouped[k].sort(function (a, b) {
+          if (a.custom !== b.custom) return a.custom ? -1 : 1;
+          return a.display.localeCompare(b.display);
+        });
+      });
+      DB_PRESETS_BY_TYPE = grouped;
+      DB_EDITOR_AVAILABLE = true;
+      if (dbBtnEl) dbBtnEl.style.display = (hasCfsBox && DB_EDITOR_AVAILABLE) ? "" : "none";
+    }).catch(function () { DB_EDITOR_AVAILABLE = false; if (dbBtnEl) dbBtnEl.style.display = "none"; });
+  };
+  window.__k1c_reload_mat_db();
 
   function listPresetsForType(type) {
     const normalizedType = String(type || "").trim().toUpperCase();
+    if (DB_PRESETS_BY_TYPE && DB_PRESETS_BY_TYPE[normalizedType] && DB_PRESETS_BY_TYPE[normalizedType].length) {
+      return DB_PRESETS_BY_TYPE[normalizedType];
+    }
     return Object.keys(MATERIAL_PRESETS).filter(function (presetKey) {
       return presetMaterialType(presetKey) === normalizedType;
     }).map(function (presetKey) {
       return MATERIAL_PRESETS[presetKey];
     });
+  }
+
+  function findPresetByTypeAndName(type, name) {
+    const normalizedName = String(name || "").trim().toLowerCase();
+    const list = listPresetsForType(type);
+    return list.find(function (p) {
+      return String(p.name || "").trim().toLowerCase() === normalizedName || String(p.display || "").trim().toLowerCase() === normalizedName;
+    }) || null;
   }
 
   function materialStatus(stateValue, present) {
@@ -701,7 +738,7 @@
     if (savingSlot) return;
     savingSlot = slot.slot;
     saveButton.disabled = true;
-    saveButton.textContent = "Saving";
+    saveButton.textContent = window.__k1cI18n ? __k1cI18n.t("saving") : "Saving";
     try {
       const normalizedType = String(draft.type || "").trim().toUpperCase();
       const preset = findPresetByTypeAndName(normalizedType, draft.name) || MATERIAL_PRESETS[normalizedType] || null;
@@ -734,7 +771,7 @@
     } finally {
       savingSlot = "";
       saveButton.disabled = false;
-      saveButton.textContent = "Save";
+      saveButton.textContent = window.__k1cI18n ? __k1cI18n.t("save") : "Save";
     }
   }
 
@@ -753,7 +790,7 @@
     head.className = "k1c-cfs-modal-head";
     const title = document.createElement("div");
     title.className = "k1c-cfs-modal-title";
-    title.textContent = "Purge Config";
+    title.textContent = window.__k1cI18n ? __k1cI18n.t("purge_config") : "Purge Config";
     head.appendChild(title);
     card.appendChild(head);
 
@@ -767,27 +804,27 @@
     }
 
     const purgeMaterials = [
-      { type: "PLA", id: "00001", commandKey: "PLA", statusKey: "pla" },
-      { type: "PLA-Silk", id: "00002", commandKey: "PLA_SILK", statusKey: "pla_silk" },
-      { type: "PETG", id: "00003", commandKey: "PETG", statusKey: "petg" },
-      { type: "ABS", id: "00004", commandKey: "ABS", statusKey: "abs" },
-      { type: "TPU", id: "00005", commandKey: "TPU", statusKey: "tpu" },
-      { type: "PLA-CF", id: "00006", commandKey: "PLA_CF", statusKey: "pla_cf" },
-      { type: "ASA", id: "00007", commandKey: "ASA", statusKey: "asa" },
-      { type: "PA", id: "00008", commandKey: "PA", statusKey: "pa" },
-      { type: "PA-CF", id: "00009", commandKey: "PA_CF", statusKey: "pa_cf" },
-      { type: "BVOH", id: "00010", commandKey: "BVOH", statusKey: "bvoh" },
-      { type: "PVA", id: "00011", commandKey: "PVA", statusKey: "pva" },
-      { type: "HIPS", id: "00012", commandKey: "HIPS", statusKey: "hips" },
-      { type: "PET-CF", id: "00013", commandKey: "PET_CF", statusKey: "pet_cf" },
-      { type: "PETG-CF", id: "00014", commandKey: "PETG_CF", statusKey: "petg_cf" },
-      { type: "PA6-CF", id: "00015", commandKey: "PA6_CF", statusKey: "pa6_cf" },
-      { type: "PAHT-CF", id: "00016", commandKey: "PAHT_CF", statusKey: "paht_cf" },
-      { type: "PPS", id: "00017", commandKey: "PPS", statusKey: "pps" },
-      { type: "PPS-CF", id: "00018", commandKey: "PPS_CF", statusKey: "pps_cf" },
-      { type: "PP", id: "00019", commandKey: "PP", statusKey: "pp" },
-      { type: "PET", id: "00020", commandKey: "PET", statusKey: "pet" },
-      { type: "PC", id: "00021", commandKey: "PC", statusKey: "pc" },
+      { type: "PLA", id: "00001", commandKey: "PLA", statusKey: "pla", def: 220 },
+      { type: "PLA-Silk", id: "00002", commandKey: "PLA_SILK", statusKey: "pla_silk", def: 220 },
+      { type: "PETG", id: "00003", commandKey: "PETG", statusKey: "petg", def: 245 },
+      { type: "ABS", id: "00004", commandKey: "ABS", statusKey: "abs", def: 260 },
+      { type: "TPU", id: "00005", commandKey: "TPU", statusKey: "tpu", def: 225 },
+      { type: "PLA-CF", id: "00006", commandKey: "PLA_CF", statusKey: "pla_cf", def: 225 },
+      { type: "ASA", id: "00007", commandKey: "ASA", statusKey: "asa", def: 260 },
+      { type: "PA", id: "00008", commandKey: "PA", statusKey: "pa", def: 260 },
+      { type: "PA-CF", id: "00009", commandKey: "PA_CF", statusKey: "pa_cf", def: 280 },
+      { type: "BVOH", id: "00010", commandKey: "BVOH", statusKey: "bvoh", def: 215 },
+      { type: "PVA", id: "00011", commandKey: "PVA", statusKey: "pva", def: 215 },
+      { type: "HIPS", id: "00012", commandKey: "HIPS", statusKey: "hips", def: 240 },
+      { type: "PET-CF", id: "00013", commandKey: "PET_CF", statusKey: "pet_cf", def: 290 },
+      { type: "PETG-CF", id: "00014", commandKey: "PETG_CF", statusKey: "petg_cf", def: 255 },
+      { type: "PA6-CF", id: "00015", commandKey: "PA6_CF", statusKey: "pa6_cf", def: 290 },
+      { type: "PAHT-CF", id: "00016", commandKey: "PAHT_CF", statusKey: "paht_cf", def: 300 },
+      { type: "PPS", id: "00017", commandKey: "PPS", statusKey: "pps", def: 320 },
+      { type: "PPS-CF", id: "00018", commandKey: "PPS_CF", statusKey: "pps_cf", def: 320 },
+      { type: "PP", id: "00019", commandKey: "PP", statusKey: "pp", def: 240 },
+      { type: "PET", id: "00020", commandKey: "PET", statusKey: "pet", def: 255 },
+      { type: "PC", id: "00021", commandKey: "PC", statusKey: "pc", def: 270 },
     ];
 
     const grid = document.createElement("div");
@@ -808,16 +845,16 @@
     const cancel = document.createElement("button");
     cancel.type = "button";
     cancel.className = "k1c-cfs-cancel-btn";
-    cancel.textContent = "Cancel";
+    cancel.textContent = window.__k1cI18n ? __k1cI18n.t("cancel") : "Cancel";
     cancel.onclick = closeModal;
 
     const save = document.createElement("button");
     save.type = "button";
     save.className = "k1c-cfs-save-btn";
-    save.textContent = "Save";
+    save.textContent = window.__k1cI18n ? __k1cI18n.t("save") : "Save";
     save.onclick = async function () {
       save.disabled = true;
-      save.textContent = "Saving";
+      save.textContent = window.__k1cI18n ? __k1cI18n.t("saving") : "Saving";
       try {
         var commandParts = ["CFS_SET_MATERIAL_DB_TEMPS"];
         for (var i = 0; i < purgeMaterials.length; i += 1) {
@@ -833,10 +870,18 @@
         window.alert("Failed to save material config: " + (error.message || String(error)));
       } finally {
         save.disabled = false;
-        save.textContent = "Save";
+        save.textContent = window.__k1cI18n ? __k1cI18n.t("save") : "Save";
       }
     };
 
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.className = "k1c-cfs-cancel-btn";
+    resetBtn.textContent = "Load Defaults";
+    resetBtn.onclick = function () {
+      purgeMaterials.forEach(function (entry) { if (purgeInputs[entry.type]) purgeInputs[entry.type].value = String(entry.def); });
+    };
+    actions.appendChild(resetBtn);
     actions.appendChild(cancel);
     actions.appendChild(save);
     card.appendChild(actions);
@@ -854,12 +899,83 @@
       purgeMaterials.forEach(function (entry) {
         var input = purgeInputs[entry.type];
         if (!input) return;
-        input.value = temps[entry.statusKey] == null ? "" : String(temps[entry.statusKey]);
+        var v = temps[entry.statusKey]; input.value = (v == null || v === "" || Number(v) <= 0) ? String(entry.def) : String(v);
       });
     } catch (error) {
       closeModal();
       window.alert("Failed to load material config: " + (error.message || String(error)));
     }
+  }
+
+  function openMaterialDbModal() {
+    closeModal();
+    const modal = document.createElement("div");
+    modal.id = MODAL_ID;
+    const card = document.createElement("div");
+    card.className = "k1c-cfs-modal-card";
+    card.style.width = "min(1280px, 95vw)";
+    card.style.maxWidth = "95vw";
+    card.style.height = "88vh";
+    card.style.display = "flex";
+    card.style.flexDirection = "column";
+    const head = document.createElement("div");
+    head.className = "k1c-cfs-modal-head";
+    const title = document.createElement("div");
+    title.className = "k1c-cfs-modal-title";
+    title.textContent = "Material Database Editor";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "k1c-cfs-cancel-btn";
+    closeBtn.textContent = window.__k1cI18n ? __k1cI18n.t("close") : "Close";
+    const onDone = function () {
+      closeModal();
+      if (typeof window.__k1c_reload_mat_db === "function") window.__k1c_reload_mat_db();
+    };
+    closeBtn.onclick = onDone;
+    head.appendChild(title);
+    head.appendChild(closeBtn);
+    card.appendChild(head);
+    const frame = document.createElement("iframe");
+    frame.src = "http://" + window.location.hostname + ":8088/";
+    frame.style.width = "100%";
+    frame.style.flex = "1";
+    frame.style.border = "none";
+    frame.style.background = "#121212";
+    card.appendChild(frame);
+    modal.appendChild(card);
+    modal.addEventListener("click", function (event) {
+      if (event.target === modal) onDone();
+    });
+    document.body.appendChild(modal);
+  }
+
+  let latestBoxInfoList = [];
+  function computeSlotRemaining(slot) {
+    if (!slot || !slot.present || slot.is_holder) return null;
+    var idx = (slot.material_index != null && slot.material_index !== "" && !isNaN(Number(slot.material_index)) && Number(slot.material_index) >= 0) ? Number(slot.material_index) : -1;
+    if (idx < 0 || idx >= latestBoxInfoList.length) {
+      var sm = String(slot.slot || slot.id || "").match(/([A-D])$/i);
+      if (sm) idx = "ABCD".indexOf(sm[1].toUpperCase());
+    }
+    var bi = (Array.isArray(latestBoxInfoList) && idx >= 0 && idx < latestBoxInfoList.length) ? latestBoxInfoList[idx] : null;
+    if (!bi || (Number(bi.editable) !== 0 && !String(bi.vender || "").trim()) || Number(bi.total_len || 0) <= 0) return null;
+
+    var raw = slot.raw || {};
+    var totalLen = Number(bi.total_len || raw.total_len || raw.totalMaterialLength || 0);
+    var usedLen = Number(slot.used_material_length || raw.usedMaterialLength || 0);
+    var pct = bi.percent != null ? Number(bi.percent) : (raw.percent != null ? Number(raw.percent) : null);
+
+    if (totalLen > 0 && usedLen > 0) {
+      pct = Math.max(0, Math.min(100, Math.round(((totalLen - usedLen) / totalLen) * 100)));
+    }
+    if (pct == null || isNaN(pct) || pct <= 0) return null;
+    pct = Math.max(0, Math.min(100, Math.round(pct)));
+
+    var totalMeters = totalLen > 5000 ? (totalLen / 1000.0) : totalLen;
+    var estTotalGrams = Math.round(totalMeters * 2.98);
+    var grams = estTotalGrams > 0 ? Math.max(0, Math.round(estTotalGrams * (pct / 100.0))) : null;
+    var remMeters = totalMeters > 0 ? Math.round(totalMeters * (pct / 100.0)) : null;
+    return { pct: pct, grams: grams, meters: remMeters, totalMeters: Math.round(totalMeters), hasRfid: true };
   }
 
   function openEditModal(slot) {
@@ -878,11 +994,11 @@
     head.className = "k1c-cfs-modal-head";
     const title = document.createElement("div");
     title.className = "k1c-cfs-modal-title";
-    title.textContent = slot.slot + " Edit Material";
+    title.textContent = slot.slot + " " + (window.__k1cI18n ? __k1cI18n.t("edit_material") : "Edit Material");
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "k1c-cfs-cancel-btn";
-    closeBtn.textContent = "Close";
+    closeBtn.textContent = window.__k1cI18n ? __k1cI18n.t("close") : "Close";
     closeBtn.onclick = closeModal;
     head.appendChild(title);
     head.appendChild(closeBtn);
@@ -906,13 +1022,13 @@
     colorAvatar.appendChild(colorOverlay);
     const colorLabel = document.createElement("span");
     colorLabel.className = "k1c-cfs-color-label";
-    colorLabel.textContent = "COLOR";
+    colorLabel.textContent = window.__k1cI18n ? __k1cI18n.t("color") : "COLOR";
     colorWrap.appendChild(colorAvatar);
     colorWrap.appendChild(colorLabel);
     body.appendChild(colorWrap);
 
     const select = document.createElement("select");
-    MATERIAL_TYPES.forEach(function (material) {
+    MATERIAL_TYPES.filter(function (m) { return DB_ALLOW_CF || (m.indexOf("-CF") === -1 && m.indexOf("-GF") === -1); }).forEach(function (material) {
       const option = document.createElement("option");
       option.value = material;
       option.textContent = material;
@@ -944,19 +1060,16 @@
 
     function syncNameOptions(materialType, preferredName) {
       const presets = listPresetsForType(materialType);
-      const names = (MATERIAL_NAME_OPTIONS[materialType] || presets.map(function (preset) {
-        return preset.name;
-      })).filter(Boolean);
       const currentName = String(preferredName || slot.name || "").trim();
       nameSelect.innerHTML = "";
-      names.forEach(function (name) {
+      presets.forEach(function (preset) {
         const option = document.createElement("option");
-        option.value = name;
-        option.textContent = name;
-        if (currentName && currentName === name) option.selected = true;
+        option.value = preset.name;
+        option.textContent = preset.display || preset.name;
+        if (currentName && currentName === preset.name) option.selected = true;
         nameSelect.appendChild(option);
       });
-      if (!nameSelect.value && names[0]) nameSelect.value = names[0];
+      if (!nameSelect.value && presets[0]) nameSelect.value = presets[0].name;
     }
 
     function applyPreset(materialType, preferredName) {
@@ -998,12 +1111,12 @@
     const cancel = document.createElement("button");
     cancel.type = "button";
     cancel.className = "k1c-cfs-cancel-btn";
-    cancel.textContent = "Cancel";
+    cancel.textContent = window.__k1cI18n ? __k1cI18n.t("cancel") : "Cancel";
     cancel.onclick = closeModal;
     const save = document.createElement("button");
     save.type = "button";
     save.className = "k1c-cfs-save-btn";
-    save.textContent = "Save";
+    save.textContent = window.__k1cI18n ? __k1cI18n.t("save") : "Save";
     save.onclick = function () {
       saveSlot(
         slot,
@@ -1058,7 +1171,7 @@
     feedBtn.disabled = true;
     feedBtn.appendChild(createSvgPath("M11 4v11.2l-3.6-3.6-1.4 1.4 6 6 6-6-1.4-1.4-3.6 3.6V4h-2z"));
     const feedText = document.createElement("span");
-    feedText.textContent = "Feed";
+    feedText.textContent = window.__k1cI18n ? __k1cI18n.t("feed") : "Feed";
     feedBtn.appendChild(feedText);
     feedBtn.onclick = function () {
       const slot = latestSlots.find(function (item) { return item.slot === selectedSlot; });
@@ -1073,7 +1186,7 @@
     configBtn.className = "k1c-cfs-action";
     configBtn.appendChild(createSvgPath("M19.4 13a7.8 7.8 0 0 0 .1-1 7.8 7.8 0 0 0-.1-1l2.1-1.6-2-3.4-2.5 1a7.2 7.2 0 0 0-1.7-1l-.4-2.7h-4l-.4 2.7a7.2 7.2 0 0 0-1.7 1l-2.5-1-2 3.4L4.6 11a7.8 7.8 0 0 0-.1 1 7.8 7.8 0 0 0 .1 1l-2.1 1.6 2 3.4 2.5-1a7.2 7.2 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.2 7.2 0 0 0 1.7-1l2.5 1 2-3.4-2.1-1.6zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z"));
     const configText = document.createElement("span");
-    configText.textContent = "Purge Settings";
+    configText.textContent = window.__k1cI18n ? __k1cI18n.t("purge_settings") : "Purge Settings";
     configBtn.appendChild(configText);
     configBtn.title = "Config";
     configBtn.onclick = function () {
@@ -1087,7 +1200,7 @@
     retractBtn.disabled = true;
     retractBtn.appendChild(createSvgPath("M13 20V8.8l3.6 3.6 1.4-1.4-6-6-6 6 1.4 1.4 3.6-3.6V20h2z"));
     const retractText = document.createElement("span");
-    retractText.textContent = "Retract";
+    retractText.textContent = window.__k1cI18n ? __k1cI18n.t("retract") : "Retract";
     retractBtn.appendChild(retractText);
     retractBtn.onclick = function () {
       const slot = latestSlots.find(function (item) { return item.slot === selectedSlot; });
@@ -1099,7 +1212,156 @@
     controlsRow.appendChild(feedBtn);
     controlsRow.appendChild(retractBtn);
     controls.appendChild(controlsRow);
+    const dbBtn = document.createElement("button");
+    dbBtn.type = "button";
+    dbBtn.className = "k1c-cfs-action";
+    dbBtn.appendChild(createSvgPath("M12 3C7.58 3 4 4.79 4 7v10c0 2.21 3.58 4 8 4s8-1.79 8-4V7c0-2.21-3.58-4-8-4zm0 2c3.87 0 6 .9 6 2s-2.13 2-6 2-6-.9-6-2 2.13-2 6-2zm0 14c-3.87 0-6-.9-6-2v-2.23c1.61.78 3.72 1.23 6 1.23s4.39-.45 6-1.23V17c0 1.1-2.13 2-6 2zm0-5c-3.87 0-6-.9-6-2V9.77C7.61 10.55 9.72 11 12 11s4.39-.45 6-1.23V12c0 1.1-2.13 2-6 2z"));
+    const dbText = document.createElement("span");
+    dbText.textContent = window.__k1cI18n ? __k1cI18n.t("material_db") : "Material DB";
+    dbBtn.appendChild(dbText);
+    dbBtn.title = "Open Material Database Editor";
+    dbBtn.onclick = function () { openMaterialDbModal(); };
+    dbBtnEl = dbBtn;
+
+    const mapBtn = document.createElement("button");
+    mapBtn.type = "button";
+    mapBtn.className = "k1c-cfs-action";
+    mapBtn.appendChild(createSvgPath("M4 6h10v2H4V6zm0 5h10v2H4v-2zm0 5h7v2H4v-2zm13-9l4 4-4 4v-3h-2v-2h2V7z"));
+    const mapText = document.createElement("span");
+    mapText.textContent = window.__k1cI18n ? __k1cI18n.t("map_print") : "Map & Print";
+    mapBtn.appendChild(mapText);
+    mapBtn.title = "Map G-Code filament types/colors to CFS-C slots and start print";
+    mapBtn.onclick = async function () {
+      closeModal();
+      const overlay = document.createElement("div");
+      overlay.id = MODAL_ID;
+      overlay.setAttribute("style", "position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;");
+      overlay.onclick = function (ev) { if (ev.target === overlay) closeModal(); };
+      const card = document.createElement("div");
+      card.setAttribute("style", "width:min(540px,94vw);background:#1b1d23;color:#ffffff;border:1px solid #353a46;border-radius:14px;padding:20px;box-shadow:0 24px 60px rgba(0,0,0,0.85);");
+      card.innerHTML = "<div class=\"k1c-cfs-modal-head\"><h3 style=color:#ffffff;margin:0>Map Filaments & Start Print</h3><button type=\"button\" class=\"k1c-cfs-modal-close\" id=\"k1c-mp-x\">×</button></div><div class=\"k1c-cfs-modal-body\" style=\"display:flex;flex-direction:column;gap:12px;padding-top:8px\"><select id=\"k1c-mp-f\" style=\"width:100%;padding:9px;border-radius:8px;background:#1b1d22;color:#f3f5f8;border:1px solid rgba(255,255,255,.15)\"></select><div id=\"k1c-mp-l\" style=\"display:flex;flex-direction:column;gap:8px\">Loading G-Code files...</div><label style=\"display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:#23262f;border:1px solid #323744;font-size:12.5px;color:#e6ebf2;cursor:pointer\"><input type=\"checkbox\" id=\"k1c-mp-auto\" style=\"width:16px;height:16px;accent-color:#4f8cff\"> Auto-open this mapping dialog when a print starts</label><div style=\"display:flex;justify-content:flex-end;gap:10px;margin-top:6px\"><button type=\"button\" class=\"k1c-cfs-action\" id=\"k1c-mp-c\">Cancel</button><button type=\"button\" class=\"k1c-cfs-action primary\" id=\"k1c-mp-s\">Apply & Print</button></div></div>";
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+      card.querySelector("#k1c-mp-x").onclick = closeModal;
+      card.querySelector("#k1c-mp-c").onclick = closeModal;
+      const fSel = card.querySelector("#k1c-mp-f");
+      const mList = card.querySelector("#k1c-mp-l");
+      const sBtn = card.querySelector("#k1c-mp-s"); const aChk = card.querySelector("#k1c-mp-auto"); queryKlipperObject("save_variables").then(function(sv){ var v=(sv&&sv.result&&sv.result.status&&sv.result.status.save_variables&&sv.result.status.save_variables.variables)||{}; aChk.checked=Number(v.cfs_auto_map||0)===1; }).catch(function(){}); aChk.onchange=function(){ runKlipperCommand("SET_CFS_AUTO_MAP ENABLE="+(aChk.checked?"1":"0")); };
+      const slots = (latestSlots || []).filter(function (x) { return x && x.present && !x.is_holder; });
+      let reqs = [];
+
+      async function loadGcode(fn) {
+        mList.textContent = "Reading G-Code...";
+        const enc = fn.split("/").map(encodeURIComponent).join("/");
+        const txt = await fetch("/server/files/gcodes/" + enc, { headers: { Range: "bytes=0-131071" } }).then(function (r) { return r.text(); });
+        let ft = [], fc = [];
+        const ts = new Set();
+        txt.split("\n").forEach(function (rawLine) {
+          const line = rawLine.trim();
+          if (line.indexOf("; filament_type =") === 0) ft = line.split("=").slice(1).join("=").split(";").map(function (x) { return x.trim().toUpperCase(); });
+          else if (line.indexOf("; filament_colour =") === 0) fc = line.split("=").slice(1).join("=").split(";").map(function (x) { return x.trim(); });
+          else if ((line === "T0" || line === "T1" || line === "T2" || line === "T3" || line.indexOf("T0 ") === 0 || line.indexOf("T1 ") === 0 || line.indexOf("T2 ") === 0 || line.indexOf("T3 ") === 0)) ts.add(Number(line.charAt(1)));
+        });
+        if (!ts.size) ts.add(0);
+        reqs = Array.from(ts).sort().map(function (t) { return { t: t, type: ft[t] || ft || "PLA", hex: fc[t] || fc || "#FFFFFF" }; });
+        mList.innerHTML = "";
+        reqs.forEach(function (q) {
+          const row = document.createElement("div");
+          row.style.cssText = "display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#24272e;border-radius:8px";
+          row.innerHTML = "<div style=\"display:flex;align-items:center;gap:8px\"><span style=\"width:14px;height:14px;border-radius:50%;background:" + normalizeColor(q.hex) + ";border:1px solid #fff4\"></span><b>T" + q.t + " · " + q.type + "</b> <small style=\"color:#9aa\">" + q.hex + "</small></div>";
+          const sel = document.createElement("select");
+          sel.dataset.t = String(q.t);
+          sel.style.cssText = "padding:6px 8px;border-radius:6px;background:#16181d;color:#f3f5f8;border:1px solid rgba(255,255,255,.16)";
+          slots.forEach(function (sl) {
+            const o = document.createElement("option");
+            o.value = String(sl.material_index);
+            o.textContent = (sl.display_label || ("Slot " + sl.slot)) + " (" + (sl.type || "?") + ")";
+            if (String(sl.type || "").toUpperCase() === q.type) o.selected = true;
+            sel.appendChild(o);
+          });
+          row.appendChild(sel);
+          mList.appendChild(row);
+        });
+        sBtn.disabled = !slots.length;
+      }
+
+      sBtn.onclick = async function () {
+        sBtn.disabled = true;
+        sBtn.textContent = "Starting...";
+        const sels = mList.querySelectorAll("select[data-t]");
+        for (let i = 0; i < sels.length; i++) {
+          const q = reqs.find(function (x) { return x.t === Number(sels[i].dataset.t); });
+          const sl = slots.find(function (x) { return x.material_index === Number(sels[i].value); });
+          if (q && sl) {
+            const c = parseInt(String(q.hex || "").replace("#", "").slice(0, 6), 16) || 0;
+            sendJson({ method: "set", params: { setMaterialInfo: { boxId: typeof sl.box_id === "number" ? sl.box_id : 1, materialId: sl.material_index, type: q.type, color: c, name: sl.name || q.type, vendor: sl.vendor || "Generic" } } });
+          }
+        }
+        await new Promise(function (r) { window.setTimeout(r, 450); });
+        await fetch("/printer/print/start?filename=" + encodeURIComponent(fSel.value), { method: "POST" });
+        closeModal();
+      };
+
+      const res = await fetch("/server/files/list?root=gcodes").then(function (r) { return r.json(); });
+      const files = ((res && res.result) || []).filter(function (f) { return f && f.path && f.path.toLowerCase().endsWith(".gcode"); }).sort(function (a, b) { return Number(b.modified || 0) - Number(a.modified || 0); }).slice(0, 15);
+      fSel.innerHTML = "";
+      files.forEach(function (f) {
+        const o = document.createElement("option");
+        o.value = f.path;
+        o.textContent = f.path;
+        fSel.appendChild(o);
+      });
+      fSel.onchange = function () { loadGcode(fSel.value); };
+      if (files.length) await loadGcode(files.slice(0,1).map(function(x){return x.path;}).join(""));
+      else mList.textContent = "No G-Code files found.";
+    };
     controls.appendChild(configBtn);
+    controls.appendChild(dbBtn);
+    const mapGroup = document.createElement("div");
+    mapGroup.style.cssText = "display:flex;width:100%;align-items:stretch;border:1px solid rgba(255,255,255,0.16);border-radius:8px;overflow:hidden;background:rgba(255,255,255,0.03);";
+    mapBtn.style.border = "none";
+    mapBtn.style.borderRadius = "0";
+    mapBtn.style.margin = "0"; mapBtn.style.flex = "1"; mapBtn.style.justifyContent = "center";
+    const autoLbl = document.createElement("button");
+    autoLbl.type = "button";
+    autoLbl.className = "k1c-cfs-action";
+    autoLbl.style.cssText = "display:flex;flex:1;justify-content:center;align-items:center;gap:7px;cursor:pointer;user-select:none;border:none;border-left:1px solid rgba(255,255,255,0.16);border-radius:0;margin:0;padding:0 10px;background:rgba(0,0,0,0.18);";
+    autoLbl.title = "Auto: Ask = always open Map & Print before print | Auto: Match = start immediately if matching filament is loaded";
+    const swTrack = document.createElement("span");
+    swTrack.style.cssText = "position:relative;display:inline-block;width:26px;height:14px;border-radius:999px;background:#4b5563;transition:background .18s;flex-shrink:0;";
+    const swKnob = document.createElement("span");
+    swKnob.style.cssText = "position:absolute;top:2px;left:2px;width:10px;height:10px;border-radius:50%;background:#fff;transition:transform .18s;";
+    swTrack.appendChild(swKnob);
+    const autoTxt = document.createElement("span");
+    autoTxt.style.fontSize = "12px";
+    let autoEn = localStorage.getItem("cfs_auto_map_modal") !== "0";
+    const renderToggle = () => {
+      swTrack.style.background = autoEn ? "#4f7df3" : "#4b5563";
+      swKnob.style.transform = autoEn ? "translateX(12px)" : "translateX(0)";
+      const enStr = autoEn ? "Open on Print" : "Only on Mismatch";
+      autoTxt.__k1cOrig = enStr;
+      autoTxt.textContent = enStr;
+    };
+    renderToggle();
+    autoLbl.appendChild(swTrack);
+    autoLbl.appendChild(autoTxt);
+    fetch("/cfs-gate/enabled").then(r => r.ok ? r.json() : null).then(d => {
+      if (d && typeof d.enabled === "boolean") {
+        autoEn = d.enabled;
+        localStorage.setItem("cfs_auto_map_modal", autoEn ? "1" : "0");
+        renderToggle();
+      }
+    }).catch(()=>{});
+    autoLbl.onclick = () => {
+      autoEn = !autoEn;
+      localStorage.setItem("cfs_auto_map_modal", autoEn ? "1" : "0");
+      renderToggle();
+      fetch("/cfs-gate/enabled", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: autoEn }) }).catch(()=>{});
+      fetch("/printer/gcode/script", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ script: "SAVE_VARIABLE VARIABLE=cfs_auto_map VALUE=" + (autoEn ? 1 : 0) }) }).catch(()=>{});
+    };
+    mapGroup.appendChild(mapBtn);
+    mapGroup.appendChild(autoLbl);
+    controls.appendChild(mapGroup);
     shell.appendChild(controls);
     return root;
   }
@@ -1295,6 +1557,7 @@
       if (titleEl && !hasCfsBox) titleEl.textContent = "Spool Holder";
     }
     if (configBtnEl) configBtnEl.style.display = hasCfsBox ? "" : "none";
+    if (dbBtnEl) dbBtnEl.style.display = hasCfsBox ? "" : "none";
 
     latestSlots.forEach(function (slot) {
       const item = document.createElement("div");
@@ -1321,9 +1584,27 @@
       channel.textContent = slot.display_label || ("Channel " + slot.slot);
       const type = document.createElement("span");
       type.className = "k1c-cfs-type";
-      type.textContent = slot.is_holder ? String(slot.type || "Empty") : (slot.present ? String(slot.type || "Unknown") : "Empty");
+      type.textContent = slot.is_holder ? (slot.type && slot.type !== "Empty" ? String(slot.type) : (window.__k1cI18n ? __k1cI18n.t("empty") : "Empty")) : (slot.present ? String(slot.type || (window.__k1cI18n ? __k1cI18n.t("unknown") : "Unknown")) : (window.__k1cI18n ? __k1cI18n.t("empty") : "Empty"));
       info.appendChild(channel);
       info.appendChild(type);
+      var rem = computeSlotRemaining(slot);
+      if (rem) {
+        if (typeof item !== "undefined" && item && item.dataset) {
+          item.dataset.rfidRem = rem.pct + "%" + (rem.grams != null ? " (~" + rem.grams + "g)" : "");
+        }
+        var remWrap = document.createElement("div");
+        remWrap.style.cssText = "display:flex;align-items:center;gap:6px;margin-top:4px;font-size:11px;color:#b8c0cc;";
+        var bar = document.createElement("div");
+        bar.style.cssText = "flex:1;max-width:64px;height:4px;border-radius:999px;background:rgba(255,255,255,.12);overflow:hidden;";
+        var fill = document.createElement("div");
+        fill.style.cssText = "height:100%;width:" + rem.pct + "%;background:" + (rem.pct <= 15 ? "#ff6b6b" : normalizeColor(slot.color)) + ";";
+        bar.appendChild(fill);
+        var lbl = document.createElement("span");
+        lbl.textContent = (rem.hasRfid ? "RFID · " : "") + rem.pct + "%" + (rem.grams != null ? " (~" + rem.grams + "g)" : "");
+        remWrap.appendChild(bar);
+        remWrap.appendChild(lbl);
+        info.appendChild(remWrap);
+      }
       main.appendChild(info);
 
       const edit = document.createElement("button");
@@ -1385,6 +1666,7 @@
       }
     }
     if (configBtnEl) configBtnEl.disabled = actionLocked;
+    if (dbBtnEl) dbBtnEl.disabled = actionLocked;
     if (retractBtnEl) retractBtnEl.disabled = actionLocked || !!actionSlot || matrixBlock || !isPresent;
 
     updateStatus(connected);
@@ -1606,7 +1888,7 @@
   let cfsIsMoving = false;
 
   function pollCfsCStatus() {
-    const urlDb = "/server/database/item?namespace=color_box&key=box_info";
+    const urlDb = "/nexusp-api/server/database/item?namespace=color_box&key=box_info";
     const urlKlipper = "/printer/objects/query?idle_timeout";
 
     Promise.all([
@@ -1615,9 +1897,13 @@
     ])
     .then(([dbData, klipperData]) => {
       if (!dbData.result || !dbData.result.value || !dbData.result.value.T1) return;
-      if (!hasCfsBox) {
-        hasCfsBox = true;
-        render(latestSlots, latestConnected);
+      if (Array.isArray(dbData.result.value.T1.list)) {
+        var prevJson = JSON.stringify(latestBoxInfoList);
+        latestBoxInfoList = dbData.result.value.T1.list;
+        if (!hasCfsBox || prevJson !== JSON.stringify(latestBoxInfoList)) {
+          hasCfsBox = true;
+          render(latestSlots, latestConnected);
+        }
       }
       if (!klipperData.result || !klipperData.result.status || !klipperData.result.status.idle_timeout) return;
 
@@ -1681,4 +1967,336 @@
     })
     .catch(err => {});
   }
+})();
+window.__isCfsNexusActive = async function() {
+  try {
+    const r = await fetch("/printer/gcode/help");
+    const j = await r.json();
+    const res = j.result || {};
+    return Boolean(res.CFS_MAP_TOOL || res.BOX_GO_TO_EXTRUDER || res.BOX_START_PRINT);
+  } catch (e) {
+    return true;
+  }
+};
+var _ms=document.createElement("script");_ms.src="k1c-cfs-map.js?v="+Date.now();document.head.appendChild(_ms);
+document.addEventListener("click", function(e) {
+  var btn = e.target && e.target.closest ? e.target.closest("button") : null;
+  if (btn && /Map\s*&\s*Print/i.test(btn.textContent || "")) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (typeof window.openMapAndPrintModal === "function") window.openMapAndPrintModal("");
+  }
+}, true);
+
+if (!window.__cfsAutoMapPoller) {
+  window.__cfsAutoMapPoller = setInterval(async function() {
+    try {
+      if (document.getElementById("cfs-map-print-modal")) return;
+      const r = await fetch("/printer/objects/query?gcode_macro%20_CFS_MAP_STATE");
+      const j = await r.json();
+      const st = (((j.result || {}).status || {})["gcode_macro _CFS_MAP_STATE"]) || {};
+      if (Number(st.awaiting) === 1 && st.filename) {
+        const active = typeof window.__isCfsNexusActive !== "function" || await window.__isCfsNexusActive();
+        if (!active) {
+          await fetch("/printer/gcode/script", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ script: "SAVE_VARIABLE VARIABLE=cfs_auto_map VALUE=0\n_CFS_CONFIRM_MAP" })
+          });
+          return;
+        }
+        if (window.__cfsAutoMapOpenFor !== st.filename && typeof window.openMapAndPrintModal === "function") {
+          window.__cfsAutoMapOpenFor = st.filename;
+          window.openMapAndPrintModal(st.filename, true);
+        }
+      } else {
+        window.__cfsAutoMapOpenFor = "";
+      }
+    } catch (e) {}
+  }, 1200);
+}
+
+if (!window.__cfsAutoMapInitSynced) {
+  window.__cfsAutoMapInitSynced = true;
+  setTimeout(async function() {
+    try {
+      const active = typeof window.__isCfsNexusActive !== "function" || await window.__isCfsNexusActive();
+      if (!active) return;
+      const want = localStorage.getItem("cfs_auto_map_modal") !== "0" ? 1 : 0;
+      const r = await fetch("/printer/objects/query?save_variables");
+      const j = await r.json();
+      const vars = (((j.result || {}).status || {}).save_variables || {}).variables || {};
+      if (Number(vars.cfs_auto_map || 0) !== want) {
+        await fetch("/printer/gcode/script", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ script: `SAVE_VARIABLE VARIABLE=cfs_auto_map VALUE=${want}` })
+        });
+      }
+    } catch (e) {}
+  }, 2500);
+}
+
+if (!window.__cfsStartInterceptorInstalled) {
+  window.__cfsStartInterceptorInstalled = true;
+  window.__cfsBypassStartOnce = false;
+
+  const shouldInterceptPrint = async () => {
+    if (window.__cfsBypassStartOnce) {
+      window.__cfsBypassStartOnce = false;
+      return false;
+    }
+    if (localStorage.getItem("cfs_auto_map_modal") === "0") return false;
+    if (typeof window.__isCfsNexusActive === "function") {
+      return await window.__isCfsNexusActive();
+    }
+    return true;
+  };
+
+  const origSend = WebSocket.prototype.send;
+  WebSocket.prototype.send = function(data) {
+    try {
+      if (typeof data === "string" && data.indexOf("printer.print.start") !== -1) {
+        const msg = JSON.parse(data);
+        if (msg && msg.method === "printer.print.start" && msg.params && msg.params.filename) {
+          const fn = msg.params.filename;
+          const ws = this;
+          shouldInterceptPrint().then((yes) => {
+            if (yes && typeof window.openMapAndPrintModal === "function") {
+              window.openMapAndPrintModal(fn, false);
+            } else {
+              window.__cfsBypassStartOnce = true;
+              origSend.call(ws, data);
+            }
+          });
+          return;
+        }
+      }
+      if (typeof data === "string" && data.indexOf("SDCARD_PRINT_FILE") !== -1) {
+        const msg = JSON.parse(data);
+        const sc = (msg && msg.params && msg.params.script) || "";
+        const m = sc.match(/SDCARD_PRINT_FILE\s+FILENAME="?([^"\n]+)"?/i);
+        if (msg && msg.method === "printer.gcode.script" && m) {
+          const fn = m.slice(1, 2).join("").trim();
+          const ws = this;
+          shouldInterceptPrint().then((yes) => {
+            if (yes && typeof window.openMapAndPrintModal === "function") {
+              window.openMapAndPrintModal(fn, false);
+            } else {
+              window.__cfsBypassStartOnce = true;
+              origSend.call(ws, data);
+            }
+          });
+          return;
+        }
+      }
+    } catch (e) {}
+    return origSend.apply(this, arguments);
+  };
+}
+
+if (!window.__cfsHttpStartInterceptor) {
+  window.__cfsHttpStartInterceptor = true;
+  const extractFnFromUrl = (u) => {
+    try {
+      const urlObj = new URL(u, window.location.origin);
+      if (urlObj.pathname.indexOf("/printer/print/start") !== -1) {
+        return urlObj.searchParams.get("filename") || "";
+      }
+    } catch (e) {}
+    return "";
+  };
+
+  const origFetch = window.fetch;
+  window.fetch = async function(input, init) {
+    try {
+      const urlStr = typeof input === "string" ? input : (input && input.url) || "";
+      let fn = extractFnFromUrl(urlStr);
+      if (!fn && urlStr.indexOf("/printer/print/start") !== -1 && init && init.body) {
+        try { fn = JSON.parse(init.body).filename || ""; } catch (e) {}
+      }
+      if (fn) {
+        const autoOn = localStorage.getItem("cfs_auto_map_modal") !== "0";
+        const active = typeof window.__isCfsNexusActive !== "function" || await window.__isCfsNexusActive();
+        if (autoOn && active && typeof window.openMapAndPrintModal === "function") {
+          window.openMapAndPrintModal(fn, false);
+          return new Response(JSON.stringify({ result: "ok" }), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+      }
+    } catch (e) {}
+    return origFetch.apply(this, arguments);
+  };
+
+  const origXhrOpen = XMLHttpRequest.prototype.open;
+  const origXhrSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function(method, url) {
+    this.__cfsUrl = url;
+    return origXhrOpen.apply(this, arguments);
+  };
+  XMLHttpRequest.prototype.send = function(body) {
+    try {
+      let fn = extractFnFromUrl(this.__cfsUrl || "");
+      if (!fn && String(this.__cfsUrl || "").indexOf("/printer/print/start") !== -1 && typeof body === "string") {
+        try { fn = JSON.parse(body).filename || ""; } catch (e) {}
+      }
+      if (fn && localStorage.getItem("cfs_auto_map_modal") !== "0" && typeof window.openMapAndPrintModal === "function") {
+        window.openMapAndPrintModal(fn, false);
+        return;
+      }
+    } catch (e) {}
+    return origXhrSend.apply(this, arguments);
+  };
+}
+
+;(function(){
+  if (window.__k1cDomI18n) return;
+  window.__k1cDomI18n = true;
+  const MAP = {
+    de: {
+      "Map Filaments & Start Print": "Filamente zuordnen & Druck starten",
+      "Please select the CFS slot matching each filament:": "Bitte wählen Sie den CFS-Slot aus, der dem jeweiligen Filament entspricht:",
+      "Unassigned filaments remaining – printing disabled.": "Es gibt Filamente ohne Zuordnung – Drucken nicht möglich.",
+      "-- Empty --": "-- Leer --",
+      "Always open before starting a print": "Immer vor dem Druckstart öffnen",
+      "When unchecked, opens only if matching filament is missing in CFS-C": "Ohne Haken öffnet sich der Dialog nur, wenn passendes Filament im CFS-C fehlt",
+      "Apply & Print": "Übernehmen & Drucken",
+      "Reading G-Code...": "Lese G-Code...",
+      "No G-Code files found.": "Keine G-Code-Dateien gefunden.",
+      "Open on Print": "Vor Druck öffnen",
+      "Only on Mismatch": "Nur bei Mismatch",
+      "Feed": "Einziehen",
+      "Retract": "Zurückziehen",
+      "Purge Settings": "Spüleinstellungen",
+      "Purge Config": "Spül-Konfig",
+      "Material DB": "Material-DB",
+      "Cancel": "Abbrechen",
+      "Close": "Schließen",
+      "Save": "Speichern",
+      "Saving": "Speichere",
+      "COLOR": "FARBE",
+      "Empty": "Leer",
+      "External": "Extern",
+      "Spool Holder": "Spulenhalter",
+      "Please assign in Screen": "Bitte am Display zuweisen"
+    },
+    ca: {"Open on Print": "Obre en imprimir", "Only on Mismatch": "Només si no coincideix", "Map Filaments & Start Print": "Assigna filaments i inicia impressió", "Please select the CFS slot matching each filament:": "Seleccioneu la ranura CFS que correspon a cada filament:", "Unassigned filaments remaining – printing disabled.": "Hi ha filaments sense assignar – no es pot imprimir.", "-- Empty --": "-- Buit --", "Always open before starting a print": "Obre sempre abans d'iniciar una impressió", "When unchecked, opens only if matching filament is missing in CFS-C": "Si està desmarcat, s'obre només si falta filament compatible al CFS-C", "Apply & Print": "Aplica i imprimeix", "Reading G-Code...": "Llegint G-Code...", "No G-Code files found.": "No s'han trobat fitxers G-Code.", "Feed": "Carrega", "Retract": "Retreu", "Purge Settings": "Configuració de purga", "Purge Config": "Config. de purga", "Material DB": "Base de materials", "Cancel": "Cancel·la", "Close": "Tanca", "Save": "Desa", "Saving": "Desant", "COLOR": "COLOR", "Empty": "Buit", "External": "Extern", "Spool Holder": "Suport de bobina", "Please assign in Screen": "Assigna a la pantalla"},
+    cs: {"Open on Print": "Otevřít při tisku", "Only on Mismatch": "Jen při neshodě", "Map Filaments & Start Print": "Přiřadit filamenty a spustit tisk", "Please select the CFS slot matching each filament:": "Vyberte slot CFS odpovídající každému filamentu:", "Unassigned filaments remaining – printing disabled.": "Nepřiřazené filamenty – tisk zakázán.", "-- Empty --": "-- Prázdný --", "Always open before starting a print": "Vždy otevřít před spuštěním tisku", "When unchecked, opens only if matching filament is missing in CFS-C": "Pokud není zaškrtnuto, otevře se jen když v CFS-C chybí vhodný filament", "Apply & Print": "Použít a tisknout", "Reading G-Code...": "Načítání G-Code...", "No G-Code files found.": "Nenalezeny žádné soubory G-Code.", "Feed": "Zavést", "Retract": "Vysunout", "Purge Settings": "Nastavení čištění", "Purge Config": "Konfig. čištění", "Material DB": "Databáze materiálů", "Cancel": "Zrušit", "Close": "Zavřít", "Save": "Uložit", "Saving": "Ukládání", "COLOR": "BARVA", "Empty": "Prázdný", "External": "Externí", "Spool Holder": "Držák cívky", "Please assign in Screen": "Přiřaďte na displeji"},
+    da: {"Open on Print": "Åbn ved print", "Only on Mismatch": "Kun ved uoverensstemmelse", "Map Filaments & Start Print": "Tildel filamenter og start print", "Please select the CFS slot matching each filament:": "Vælg den CFS-plads, der passer til hvert filament:", "Unassigned filaments remaining – printing disabled.": "Ikke-tildelte filamenter – print deaktiveret.", "-- Empty --": "-- Tom --", "Always open before starting a print": "Åbn altid før start af print", "When unchecked, opens only if matching filament is missing in CFS-C": "Når ikke markeret, åbnes kun hvis matchende filament mangler i CFS-C", "Apply & Print": "Anvend og print", "Reading G-Code...": "Læser G-Code...", "No G-Code files found.": "Ingen G-Code-filer fundet.", "Feed": "Indfør", "Retract": "Træk tilbage", "Purge Settings": "Renseindstillinger", "Purge Config": "Rensekonfig.", "Material DB": "Materiale-DB", "Cancel": "Annuller", "Close": "Luk", "Save": "Gem", "Saving": "Gemmer", "COLOR": "FARVE", "Empty": "Tom", "External": "Ekstern", "Spool Holder": "Spoleholder", "Please assign in Screen": "Tildel på skærmen"},
+    it: {"Open on Print": "Apri alla stampa", "Only on Mismatch": "Solo se non corrisponde", "Map Filaments & Start Print": "Assegna filamenti e avvia stampa", "Please select the CFS slot matching each filament:": "Seleziona lo slot CFS corrispondente a ciascun filamento:", "Unassigned filaments remaining – printing disabled.": "Filamenti non assegnati – stampa disabilitata.", "-- Empty --": "-- Vuoto --", "Always open before starting a print": "Apri sempre prima di avviare una stampa", "When unchecked, opens only if matching filament is missing in CFS-C": "Se deselezionato, si apre solo se manca il filamento nel CFS-C", "Apply & Print": "Applica e stampa", "Reading G-Code...": "Lettura G-Code...", "No G-Code files found.": "Nessun file G-Code trovato.", "Feed": "Carica", "Retract": "Ritrai", "Purge Settings": "Impostazioni spurgo", "Purge Config": "Config. spurgo", "Material DB": "DB Materiali", "Cancel": "Annulla", "Close": "Chiudi", "Save": "Salva", "Saving": "Salvataggio", "COLOR": "COLORE", "Empty": "Vuoto", "External": "Esterno", "Spool Holder": "Portabobina", "Please assign in Screen": "Assegna sullo schermo"},
+    hu: {"Open on Print": "Megnyitás nyomtatáskor", "Only on Mismatch": "Csak eltérés esetén", "Map Filaments & Start Print": "Filamentek hozzárendelése és nyomtatás indítása", "Please select the CFS slot matching each filament:": "Válassza ki az egyes filamentekhez tartozó CFS nyílást:", "Unassigned filaments remaining – printing disabled.": "Hozzárendelés nélküli filamentek – nyomtatás letiltva.", "-- Empty --": "-- Üres --", "Always open before starting a print": "Mindig nyissa meg nyomtatás indítása előtt", "When unchecked, opens only if matching filament is missing in CFS-C": "Ha nincs bejelölve, csak akkor nyílik meg, ha hiányzik a megfelelő filament a CFS-C-ből", "Apply & Print": "Alkalmazás és nyomtatás", "Reading G-Code...": "G-Code beolvasása...", "No G-Code files found.": "Nem találhatók G-Code fájlok.", "Feed": "Betöltés", "Retract": "Visszahúzás", "Purge Settings": "Tisztítási beállítások", "Purge Config": "Tisztítás konfig.", "Material DB": "Anyag adatbázis", "Cancel": "Mégse", "Close": "Bezárás", "Save": "Mentés", "Saving": "Mentés...", "COLOR": "SZÍN", "Empty": "Üres", "External": "Külső", "Spool Holder": "Tekercstartó", "Please assign in Screen": "Rendelje hozzá a kijelzőn"},
+    nl: {"Open on Print": "Openen bij print", "Only on Mismatch": "Alleen bij afwijking", "Map Filaments & Start Print": "Filamenten toewijzen & print starten", "Please select the CFS slot matching each filament:": "Selecteer het CFS-slot dat overeenkomt met elk filament:", "Unassigned filaments remaining – printing disabled.": "Niet-toegewezen filamenten – printen uitgeschakeld.", "-- Empty --": "-- Leeg --", "Always open before starting a print": "Altijd openen voor het starten van een print", "When unchecked, opens only if matching filament is missing in CFS-C": "Indien uitgevinkt, opent alleen als passend filament ontbreekt in CFS-C", "Apply & Print": "Toepassen & printen", "Reading G-Code...": "G-Code lezen...", "No G-Code files found.": "Geen G-Code-bestanden gevonden.", "Feed": "Invoeren", "Retract": "Terugtrekken", "Purge Settings": "Spoelinstellingen", "Purge Config": "Spoelconfig", "Material DB": "Materiaal-DB", "Cancel": "Annuleren", "Close": "Sluiten", "Save": "Opslaan", "Saving": "Opslaan...", "COLOR": "KLEUR", "Empty": "Leeg", "External": "Extern", "Spool Holder": "Spoelhouder", "Please assign in Screen": "Toewijzen op scherm"},
+    pl: {"Open on Print": "Otwórz przy druku", "Only on Mismatch": "Tylko przy niezgodności", "Map Filaments & Start Print": "Przypisz filamenty i rozpocznij druk", "Please select the CFS slot matching each filament:": "Wybierz gniazdo CFS odpowiadające każdemu filamentowi:", "Unassigned filaments remaining – printing disabled.": "Nieprzypisane filamenty – drukowanie zablokowane.", "-- Empty --": "-- Pusty --", "Always open before starting a print": "Zawsze otwieraj przed rozpoczęciem druku", "When unchecked, opens only if matching filament is missing in CFS-C": "Po odznaczeniu otwiera się tylko, gdy brakuje pasującego filamentu w CFS-C", "Apply & Print": "Zastosuj i drukuj", "Reading G-Code...": "Odczyt G-Code...", "No G-Code files found.": "Nie znaleziono plików G-Code.", "Feed": "Podaj", "Retract": "Wycofaj", "Purge Settings": "Ustawienia czyszczenia", "Purge Config": "Konfig. czyszczenia", "Material DB": "Baza materiałów", "Cancel": "Anuluj", "Close": "Zamknij", "Save": "Zapisz", "Saving": "Zapisywanie", "COLOR": "KOLOR", "Empty": "Pusty", "External": "Zewnętrzny", "Spool Holder": "Uchwyt szpuli", "Please assign in Screen": "Przypisz na ekranie"},
+    pt: {"Open on Print": "Abrir ao imprimir", "Only on Mismatch": "Apenas se divergir", "Map Filaments & Start Print": "Mapear filamentos e iniciar impressão", "Please select the CFS slot matching each filament:": "Selecione o slot CFS correspondente a cada filamento:", "Unassigned filaments remaining – printing disabled.": "Filamentos não atribuídos – impressão desativada.", "-- Empty --": "-- Vazio --", "Always open before starting a print": "Abrir sempre antes de iniciar uma impressão", "When unchecked, opens only if matching filament is missing in CFS-C": "Se desmarcado, abre apenas se faltar filamento compatível no CFS-C", "Apply & Print": "Aplicar e imprimir", "Reading G-Code...": "Lendo G-Code...", "No G-Code files found.": "Nenhum arquivo G-Code encontrado.", "Feed": "Carregar", "Retract": "Retrair", "Purge Settings": "Configurações de purga", "Purge Config": "Config. de purga", "Material DB": "Banco de materiais", "Cancel": "Cancelar", "Close": "Fechar", "Save": "Salvar", "Saving": "Salvando", "COLOR": "COR", "Empty": "Vazio", "External": "Externo", "Spool Holder": "Suporte de carretel", "Please assign in Screen": "Atribuir na tela"},
+    ru: {"Open on Print": "Открывать при печати", "Only on Mismatch": "Только при несовпадении", "Map Filaments & Start Print": "Назначить филаменты и начать печать", "Please select the CFS slot matching each filament:": "Выберите слот CFS, соответствующий каждому филаменту:", "Unassigned filaments remaining – printing disabled.": "Есть неназначенные филаменты – печать невозможна.", "-- Empty --": "-- Пусто --", "Always open before starting a print": "Всегда открывать перед началом печати", "When unchecked, opens only if matching filament is missing in CFS-C": "Если снято, открывается только при отсутствии нужного филамента в CFS-C", "Apply & Print": "Применить и печатать", "Reading G-Code...": "Чтение G-Code...", "No G-Code files found.": "Файлы G-Code не найдены.", "Feed": "Подать", "Retract": "Извлечь", "Purge Settings": "Настройки очистки", "Purge Config": "Конфиг очистки", "Material DB": "База материалов", "Cancel": "Отмена", "Close": "Закрыть", "Save": "Сохранить", "Saving": "Сохранение", "COLOR": "ЦВЕТ", "Empty": "Пусто", "External": "Внешний", "Spool Holder": "Держатель катушки", "Please assign in Screen": "Назначьте на экране"},
+    zh: {"Open on Print": "打印时打开", "Only on Mismatch": "仅不匹配时", "Map Filaments & Start Print": "耗材映射并开始打印", "Please select the CFS slot matching each filament:": "请为每种耗材选择对应的 CFS 槽位：", "Unassigned filaments remaining – printing disabled.": "存在未分配的耗材 – 无法开始打印。", "-- Empty --": "-- 空 --", "Always open before starting a print": "每次开始打印前自动打开", "When unchecked, opens only if matching filament is missing in CFS-C": "取消勾选后，仅在 CFS-C 缺少匹配耗材时打开", "Apply & Print": "应用并打印", "Reading G-Code...": "正在读取 G-Code...", "No G-Code files found.": "未找到 G-Code 文件。", "Feed": "进料", "Retract": "退料", "Purge Settings": "冲刷设置", "Purge Config": "冲刷配置", "Material DB": "耗材库", "Cancel": "取消", "Close": "关闭", "Save": "保存", "Saving": "保存中", "COLOR": "颜色", "Empty": "空", "External": "外置料架", "Spool Holder": "料盘支架", "Please assign in Screen": "请在屏幕上分配"},
+    ja: {"Open on Print": "印刷時に開く", "Only on Mismatch": "不一致時のみ", "Map Filaments & Start Print": "フィラメント割り当てと印刷開始", "Please select the CFS slot matching each filament:": "各フィラメントに対応するCFSスロットを選択してください：", "Unassigned filaments remaining – printing disabled.": "未割り当てのフィラメントがあります – 印刷できません。", "-- Empty --": "-- 空 --", "Always open before starting a print": "印刷開始前に常に開く", "When unchecked, opens only if matching filament is missing in CFS-C": "オフの場合、CFS-Cに一致するフィラメントがない時のみ開きます", "Apply & Print": "適用して印刷", "Reading G-Code...": "G-Code読み込み中...", "No G-Code files found.": "G-Codeファイルが見つかりません。", "Feed": "ロード", "Retract": "アンロード", "Purge Settings": "パージ設定", "Purge Config": "パージ構成", "Material DB": "素材DB", "Cancel": "キャンセル", "Close": "閉じる", "Save": "保存", "Saving": "保存中", "COLOR": "色", "Empty": "空", "External": "外部", "Spool Holder": "スプールホルダー", "Please assign in Screen": "画面で割り当ててください"},
+    sv: {"Open on Print": "Öppna vid utskrift", "Only on Mismatch": "Endast vid avvikelse", "Map Filaments & Start Print": "Tilldela filament och starta utskrift", "Please select the CFS slot matching each filament:": "Välj den CFS-plats som matchar varje filament:", "Unassigned filaments remaining – printing disabled.": "Otilldelade filament kvar – utskrift inaktiverad.", "-- Empty --": "-- Tom --", "Always open before starting a print": "Öppna alltid innan utskrift startar", "When unchecked, opens only if matching filament is missing in CFS-C": "Avmarkerad öppnas endast om matchande filament saknas i CFS-C", "Apply & Print": "Verkställ och skriv ut", "Reading G-Code...": "Läser G-Code...", "No G-Code files found.": "Inga G-Code-filer hittades.", "Feed": "Mata in", "Retract": "Dra tillbaka", "Purge Settings": "Rensningsinställningar", "Purge Config": "Rensningskonfig.", "Material DB": "Material-DB", "Cancel": "Avbryt", "Close": "Stäng", "Save": "Spara", "Saving": "Sparar", "COLOR": "FÄRG", "Empty": "Tom", "External": "Extern", "Spool Holder": "Spolhållare", "Please assign in Screen": "Tilldela på skärmen"},
+    tr: {"Open on Print": "Yazdırırken aç", "Only on Mismatch": "Yalnızca uyuşmazlıkta", "Map Filaments & Start Print": "Filamentleri eşle ve baskıyı başlat", "Please select the CFS slot matching each filament:": "Her filamente karşılık gelen CFS yuvasını seçin:", "Unassigned filaments remaining – printing disabled.": "Atanmamış filamentler var – yazdırma devre dışı.", "-- Empty --": "-- Boş --", "Always open before starting a print": "Baskıya başlamadan önce her zaman aç", "When unchecked, opens only if matching filament is missing in CFS-C": "İşaretli değilse yalnızca CFS-C içinde uygun filament eksikse açılır", "Apply & Print": "Uygula ve Yazdır", "Reading G-Code...": "G-Code okunuyor...", "No G-Code files found.": "G-Code dosyası bulunamadı.", "Feed": "Yükle", "Retract": "Geri Çek", "Purge Settings": "Temizleme Ayarları", "Purge Config": "Temizleme Yapılandırması", "Material DB": "Malzeme Veritabanı", "Cancel": "İptal", "Close": "Kapat", "Save": "Kaydet", "Saving": "Kaydediliyor", "COLOR": "RENK", "Empty": "Boş", "External": "Harici", "Spool Holder": "Makara Tutucu", "Please assign in Screen": "Ekrandan atayın"},
+    ko: {"Open on Print": "출력 시 열기", "Only on Mismatch": "불일치 시에만", "Map Filaments & Start Print": "필라멘트 매핑 및 출력 시작", "Please select the CFS slot matching each filament:": "각 필라멘트에 맞는 CFS 슬롯을 선택하세요:", "Unassigned filaments remaining – printing disabled.": "할당되지 않은 필라멘트가 있습니다 – 출력 불가.", "-- Empty --": "-- 비어 있음 --", "Always open before starting a print": "출력 시작 전 항상 열기", "When unchecked, opens only if matching filament is missing in CFS-C": "체크 해제 시 CFS-C에 일치하는 필라멘트가 없을 때만 열립니다", "Apply & Print": "적용 및 출력", "Reading G-Code...": "G-Code 읽는 중...", "No G-Code files found.": "G-Code 파일을 찾을 수 없습니다.", "Feed": "공급", "Retract": "후퇴", "Purge Settings": "퍼지 설정", "Purge Config": "퍼지 구성", "Material DB": "재질 DB", "Cancel": "취소", "Close": "닫기", "Save": "저장", "Saving": "저장 중", "COLOR": "색상", "Empty": "비어 있음", "External": "외부", "Spool Holder": "스풀 홀더", "Please assign in Screen": "화면에서 지정하세요"},
+    sk: {"Open on Print": "Otvoriť pri tlači", "Only on Mismatch": "Len pri nezhode", "Map Filaments & Start Print": "Priradiť filamenty a spustiť tlač", "Please select the CFS slot matching each filament:": "Vyberte slot CFS zodpovedajúci každému filamentu:", "Unassigned filaments remaining – printing disabled.": "Nepriradené filamenty – tlač zakázaná.", "-- Empty --": "-- Prázdny --", "Always open before starting a print": "Vždy otvoriť pred spustením tlače", "When unchecked, opens only if matching filament is missing in CFS-C": "Ak nie je zaškrtnuté, otvorí sa len keď v CFS-C chýba vhodný filament", "Apply & Print": "Použiť a tlačiť", "Reading G-Code...": "Načítavanie G-Code...", "No G-Code files found.": "Nenašli sa žiadne súbory G-Code.", "Feed": "Zaviesť", "Retract": "Vysunúť", "Purge Settings": "Nastavenia čistenia", "Purge Config": "Konfig. čistenia", "Material DB": "Databáza materiálov", "Cancel": "Zrušiť", "Close": "Zavrieť", "Save": "Uložiť", "Saving": "Ukladanie", "COLOR": "FARBA", "Empty": "Prázdny", "External": "Externý", "Spool Holder": "Držiak cievky", "Please assign in Screen": "Priraďte na displeji"},
+    sl: {"Open on Print": "Odpri ob tisku", "Only on Mismatch": "Samo ob neujemanju", "Map Filaments & Start Print": "Dodeli filamente in zaženi tisk", "Please select the CFS slot matching each filament:": "Izberite režo CFS, ki ustreza posameznemu filamentu:", "Unassigned filaments remaining – printing disabled.": "Nedodeljeni filamenti – tiskanje onemogočeno.", "-- Empty --": "-- Prazno --", "Always open before starting a print": "Vedno odpri pred začetkom tiskanja", "When unchecked, opens only if matching filament is missing in CFS-C": "Če ni označeno, se odpre le, če v CFS-C manjka ustrezen filament", "Apply & Print": "Uporabi in natisni", "Reading G-Code...": "Branje G-Code...", "No G-Code files found.": "Datotek G-Code ni mogoče najti.", "Feed": "Podajaj", "Retract": "Izvleci", "Purge Settings": "Nastavitve čiščenja", "Purge Config": "Konfig. čiščenja", "Material DB": "Baza materialov", "Cancel": "Prekliči", "Close": "Zapri", "Save": "Shrani", "Saving": "Shranjevanje", "COLOR": "BARVA", "Empty": "Prazno", "External": "Zunanji", "Spool Holder": "Nosilec koluta", "Please assign in Screen": "Dodelite na zaslonu"},
+    uk: {"Open on Print": "Відкривати під час друку", "Only on Mismatch": "Лише за невідповідності", "Map Filaments & Start Print": "Призначити філаменти та почати друк", "Please select the CFS slot matching each filament:": "Виберіть слот CFS, що відповідає кожному філаменту:", "Unassigned filaments remaining – printing disabled.": "Є непризначені філаменти – друк неможливий.", "-- Empty --": "-- Порожньо --", "Always open before starting a print": "Завжди відкривати перед початком друку", "When unchecked, opens only if matching filament is missing in CFS-C": "Якщо знято, відкривається лише за відсутності потрібного філаменту в CFS-C", "Apply & Print": "Застосувати та друкувати", "Reading G-Code...": "Читання G-Code...", "No G-Code files found.": "Файли G-Code не знайдено.", "Feed": "Подати", "Retract": "Витягнути", "Purge Settings": "Налаштування очищення", "Purge Config": "Конфіг очищення", "Material DB": "База матеріалів", "Cancel": "Скасувати", "Close": "Закрити", "Save": "Зберегти", "Saving": "Збереження", "COLOR": "КОЛІР", "Empty": "Порожньо", "External": "Зовнішній", "Spool Holder": "Тримач котушки", "Please assign in Screen": "Призначте на екрані"},
+    fr: {"Open on Print": "Ouvrir à l'impression", "Only on Mismatch": "Seulement si différent", 
+      "Map Filaments & Start Print": "Associer les filaments et démarrer l'impression",
+      "Please select the CFS slot matching each filament:": "Veuillez sélectionner l'emplacement CFS correspondant à chaque filament :",
+      "Unassigned filaments remaining – printing disabled.": "Filaments non attribués – impression impossible.",
+      "-- Empty --": "-- Vide --",
+      "Always open before starting a print": "Toujours ouvrir avant de démarrer l'impression",
+      "When unchecked, opens only if matching filament is missing in CFS-C": "Si décoché, s'ouvre uniquement si un filament manque dans le CFS-C",
+      "Apply & Print": "Appliquer et imprimer",
+      "Reading G-Code...": "Lecture du G-Code...",
+      "Feed": "Charger",
+      "Retract": "Rétracter",
+      "Purge Settings": "Paramètres de purge",
+      "Material DB": "Base matériaux",
+      "Cancel": "Annuler",
+      "Close": "Fermer",
+      "Save": "Enregistrer",
+      "COLOR": "COULEUR",
+      "Empty": "Vide"
+    },
+    es: {"Open on Print": "Abrir al imprimir", "Only on Mismatch": "Solo si no coincide", 
+      "Map Filaments & Start Print": "Asignar filamentos e iniciar impresión",
+      "Please select the CFS slot matching each filament:": "Seleccione la ranura CFS correspondiente a cada filamento:",
+      "Unassigned filaments remaining – printing disabled.": "Hay filamentos sin asignar – no se puede imprimir.",
+      "-- Empty --": "-- Vacío --",
+      "Always open before starting a print": "Abrir siempre antes de iniciar una impresión",
+      "When unchecked, opens only if matching filament is missing in CFS-C": "Si está desmarcado, solo se abre si falta el filamento en el CFS-C",
+      "Apply & Print": "Aplicar e imprimir",
+      "Reading G-Code...": "Leyendo G-Code...",
+      "Feed": "Cargar",
+      "Retract": "Retraer",
+      "Purge Settings": "Ajustes de purga",
+      "Material DB": "Base materiales",
+      "Cancel": "Cancelar",
+      "Close": "Cerrar",
+      "Save": "Guardar",
+      "COLOR": "COLOR",
+      "Empty": "Vacío"
+    }
+  };
+  MAP.cz = MAP.cs; MAP.se = MAP.sv;
+  let lang = "en";
+  const norm = r => { const b = String(r||"").trim().toLowerCase().split(/[-_]/).shift(); return MAP[b] ? b : ""; };
+  async function checkLang() {
+    const isFluidd = /4408/.test(location.port) || /fluidd/i.test(document.title);
+    const urls = isFluidd
+      ? ["/server/database/item?namespace=fluidd"]
+      : ["/server/database/item?namespace=mainsail"];
+    for (const u of urls) {
+      try {
+        const r = await fetch(u);
+        if (r.ok) {
+          const raw = await r.text();
+          const m = raw.match(/"(?:language|locale)"\s*:\s*"([a-zA-Z_-]+)"/);
+          const n = norm(m ? m.slice(1,2).join("") : "");
+          if (n) { lang = n; apply(); return; }
+        }
+      } catch(e) {}
+    }
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const v = localStorage.getItem(localStorage.key(i)) || "";
+        const m = v.match(/"locale"\s*:\s*"([a-zA-Z_-]+)"/);
+        if (m && norm(m.slice(1,2).join(""))) { lang = norm(m.slice(1,2).join("")); apply(); return; }
+      }
+    } catch(e) {}
+    try {
+      const req = indexedDB.open("mainsail");
+      req.onsuccess = function(e) {
+        try {
+          const db = e.target.result;
+          const store = db.objectStoreNames.contains("mainsail") ? "mainsail" : db.objectStoreNames.item(0);
+          if (!store) return;
+          const g = db.transaction(store, "readonly").objectStore(store).get("general");
+          g.onsuccess = function() {
+            const rawLoc = String((g.result && (g.result.language || g.result.locale)) || "").trim().toLowerCase();
+            if (rawLoc.startsWith("en")) { lang = "en"; apply(); return; }
+            const n = norm(rawLoc);
+            if (n) { lang = n; apply(); }
+          };
+        } catch(err) {}
+      };
+    } catch(e) {}
+    lang = "en";
+    apply();
+  }
+  function apply() {
+    const dict = MAP[lang] || {};
+    document.querySelectorAll("body *").forEach(el => {
+      el.childNodes.forEach(n => {
+        if (n.nodeType === 3) {
+          if (n.__k1cOrig === undefined) n.__k1cOrig = n.nodeValue;
+          const orig = n.__k1cOrig, tr = orig.trim();
+          let target = orig;
+          if (dict[tr]) target = orig.replace(tr, dict[tr]);
+          else if (tr.endsWith(" Edit Material") && lang === "de") target = orig.replace("Edit Material", "Material bearbeiten");
+          if (n.nodeValue !== target) n.nodeValue = target;
+        }
+      });
+    });
+  }
+  new MutationObserver(apply).observe(document.body, { childList: true, subtree: true });
+  checkLang();
+  setInterval(checkLang, 4000);
 })();

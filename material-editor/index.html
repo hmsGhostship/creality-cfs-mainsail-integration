@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>K1C CFS-C Material Database Editor</title>
+<style>
+  :root{--bg:#12151c;--card:#1b202b;--line:#2a3140;--txt:#e6eaf2;--mut:#94a3b8;--pri:#3b82f6;--ok:#10b981;--warn:#f59e0b;--del:#ef4444}
+  *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  body{margin:0;background:var(--bg);color:var(--txt);padding:18px}
+  .wrap{max-width:1180px;margin:auto}
+  .top{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center;background:var(--card);padding:16px 20px;border-radius:12px;border:1px solid var(--line);margin-bottom:16px}
+  h1{margin:0;font-size:1.25rem}
+  .sub{font-size:.85rem;color:var(--mut);margin-top:4px}
+  .btns{display:flex;flex-wrap:wrap;gap:8px}
+  button,.btn{background:#252c3b;color:var(--txt);border:1px solid var(--line);padding:8px 14px;border-radius:8px;cursor:pointer;font-size:.88rem;font-weight:600;text-decoration:none}
+  button:hover,.btn:hover{filter:brightness(1.15)}
+  .pri{background:var(--pri);border-color:var(--pri);color:#fff}
+  .ok{background:var(--ok);border-color:var(--ok);color:#062319}
+  .warn{background:var(--warn);border-color:var(--warn);color:#231702}
+  .del{background:var(--del);border-color:var(--del);color:#fff;padding:5px 9px;font-size:.8rem}
+  .bar{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px}
+  input,select{background:var(--card);color:var(--txt);border:1px solid var(--line);padding:9px 12px;border-radius:8px;font-size:.9rem}
+  input[type=search]{flex:1;min-width:220px}
+  table{width:100%;border-collapse:collapse;background:var(--card);border-radius:12px;overflow:hidden;border:1px solid var(--line)}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);font-size:.9rem}
+  th{background:#161a24;color:var(--mut);font-weight:600}
+  tr:hover{background:#202634}
+  .tag{padding:2px 8px;border-radius:999px;font-size:.75rem;font-weight:700}
+  .t-cust{background:rgba(16,185,129,.18);color:#34d399}
+  .t-stock{background:rgba(148,163,184,.15);color:#94a3b8}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;padding:16px}
+  .modal.open{display:flex}
+  .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;width:100%;max-width:520px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+  .grid label{display:flex;flex-direction:column;gap:5px;font-size:.82rem;color:var(--mut)}
+  .full{grid-column:1/-1}
+  .toast{position:fixed;bottom:18px;right:18px;background:#1e293b;border:1px solid var(--ok);padding:12px 16px;border-radius:10px;display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1>K1C CFS-C Material Database Editor</h1>
+      <div class="sub">Edits <code>/usr/data/creality/gui/config/material_database.json</code> (Touchscreen &amp; CFS-C Web Addon)</div>
+    </div>
+    <div class="btns" style="align-items:center">
+      <button class="pri" onclick="openNew()" title="Create a single custom filament profile manually">+ New Filament</button>
+      <button class="ok" onclick="openPackModal()" title="Choose and install pre-tuned CFS-C filament presets">Add Selection to DB</button>
+      <select id="actionMenu" onchange="runAction(this.value);this.value=''" style="background:#16a34a;color:#fff;border:1px solid #15803d;border-radius:6px;padding:7px 11px;font-weight:600;cursor:pointer">
+        <option value="">Import / Export &#9662;</option>
+        <option value="orca">Import OrcaSlicer JSON(s)...</option>
+        <option value="bat">Download Windows Sender (.bat)</option>
+        <option value="backup">Download Database Backup (.json)</option>
+      </select>
+      <input id="orcaFile" type="file" accept=".json" multiple style="display:none" onchange="importOrca(this.files)">
+      <button onclick="openSettings()" title="Configure editor preferences and database restore">&#9881; Settings</button>
+    </div>
+  </div>
+  <div class="bar">
+    <input id="q" type="search" placeholder="Search by brand, name, type or ID..." oninput="render()">
+    <select id="fBrand" onchange="render()"><option value="">All Brands</option></select>
+    <select id="fType" onchange="render()"><option value="">All Types</option></select>
+    <select id="fScope" onchange="render()"><option value="">All Entries</option><option value="custom">Custom Only (90001+)</option><option value="stock">Stock Only</option></select>
+  </div>
+  <table>
+    <thead><tr>
+  <th style="cursor:pointer;user-select:none" onclick="setSort('id')">ID <span id="srt_id"></span></th>
+  <th style="cursor:pointer;user-select:none" onclick="setSort('status')">Status <span id="srt_status"></span></th>
+  <th style="cursor:pointer;user-select:none" onclick="setSort('brand')">Brand <span id="srt_brand"></span></th>
+  <th style="cursor:pointer;user-select:none" onclick="setSort('name')">Name <span id="srt_name"></span></th>
+  <th style="cursor:pointer;user-select:none" onclick="setSort('type')">Type <span id="srt_type"></span></th>
+  <th style="cursor:pointer;user-select:none" onclick="setSort('nozzle')">Nozzle <span id="srt_nozzle"></span></th>
+  <th style="cursor:pointer;user-select:none" onclick="setSort('bed')">Bed <span id="srt_bed"></span></th>
+  <th style="cursor:pointer;user-select:none" onclick="setSort('flow')">Max Flow <span id="srt_flow"></span></th>
+  <th>Actions</th>
+</tr></thead>
+    <tbody id="tb"></tbody>
+  </table>
+</div>
+<div id="packModal" class="modal" onclick="if(event.target===this)closePackModal()"><div class="box" style="max-width:640px">
+  <h3 style="margin:0 0 6px 0">Select Community Presets to Install</h3>
+  <div style="font-size:12px;color:#aaa;margin-bottom:10px">Choose which pre-tuned CFS-C profiles you want to add to your printer database:</div>
+  <div style="margin-bottom:8px"><label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:#eee"><input id="pkAll" type="checkbox" style="width:auto" onchange="toggleAllPacks(this.checked)"> Select / Deselect All</label></div>
+  <div id="pkList" style="max-height:300px;overflow:auto;border:1px solid #333;border-radius:6px;background:#111;padding:6px"></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+    <button onclick="closePackModal()">Cancel</button>
+    <button id="btnAddSel" class="ok" onclick="installSelectedPacks()">Add Selected</button>
+  </div>
+</div></div>
+<div id="setModal" class="modal"><div class="box">
+  <h3>Editor Settings</h3>
+  <div style="margin:12px 0;padding:10px;background:#111;border:1px solid #333;border-radius:6px">
+    <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;color:#eee;font-size:13px">
+      <input id="s_allow_cf" type="checkbox" style="width:auto;margin-top:3px">
+      <span><strong>Include abrasive CF/GF materials</strong><br><span style="color:#f59e0b;font-size:12px">Warning: Carbon/Glass fiber filaments (PLA-CF, PETG-CF, PA-CF) cause severe wear in CFS-C feeders and tubes. Only enable if you intentionally want CF/GF selectable in the editor and Windows Sender (.bat).</span></span>
+    </label>
+  </div>
+  <div style="margin:12px 0;padding:10px;background:#111;border:1px solid #333;border-radius:6px">
+    <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;color:#eee;font-size:13px">
+      <input id="s_edit_stock" type="checkbox" style="width:auto;margin-top:3px">
+      <span><strong>Allow editing stock profiles (Creality / Generic)</strong><br><span style="color:#aaa;font-size:12px">Disabled by default to protect factory entries. Use Clone to create an editable custom copy (90001+), or enable this option to modify stock entries directly.</span></span>
+    </label>
+  </div>
+  <div style="margin:12px 0;padding:10px;background:#111;border:1px solid #333;border-radius:6px;display:flex;justify-content:space-between;align-items:center">
+    <span style="font-size:12px;color:#aaa">Database Maintenance</span>
+    <button id="btnBak" class="warn" style="display:none" onclick="closeSettings();restoreBak()">Restore Factory Original (.bak)</button>
+  </div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+    <button onclick="closeSettings()">Cancel</button>
+    <button class="pri" onclick="saveSettings()">Save Settings</button>
+  </div>
+</div></div>
+<div id="modal" class="modal" onclick="if(event.target===this)closeM()">
+  <div class="box">
+    <h2 id="mTitle" style="margin:0">Edit Filament</h2>
+    <div class="grid">
+      <label>ID (empty = auto 90001+)<input id="f_id" placeholder="90008"></label>
+      <label>Material Type<select id="f_type"><option>PLA</option><option>PLA-Silk</option><option>PETG</option><option>ABS</option><option>ASA</option><option>TPU</option><option>PA</option><option>PP</option><option>PC</option></select></label>
+      <label>Brand / Vendor<input id="f_brand" placeholder="Sunlu"></label>
+      <label>Profile Name<input id="f_name" placeholder="HighSpeed PLA"></label>
+      <label>Nozzle (°C)<input id="f_noz" type="number" value="215"></label>
+      <label>Nozzle 1st Layer (°C)<input id="f_nozi" type="number" value="220"></label>
+      <label>Bed Temp (°C)<input id="f_bed" type="number" value="60"></label>
+      <label>Max Volumetric Speed (mm³/s)<input id="f_vol" type="number" step="0.5" value="18"></label>
+      <label>Drying Temp (°C)<input id="f_dryt" type="number" value="55"></label>
+      <label>Drying Time (h)<input id="f_dryh" type="number" value="6"></label>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+      <button onclick="closeM()">Cancel</button>
+      <button class="pri" onclick="saveItem()">Save</button>
+    </div>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
+<script>
+async function openPackModal(){
+  const r=await (await fetch('api/presets')).json();
+  if(!r.ok)return alert(r.error);
+  const box=document.getElementById('pkList');
+  const list=r.presets||[];
+  box.innerHTML=list.length?list.map(p=>`<label style="display:flex;align-items:center;gap:10px;padding:7px 8px;border-bottom:1px solid #222;cursor:pointer;font-size:13px">
+    <input type="checkbox" class="pkCb" value="${p.id}" checked style="width:auto">
+    <span style="min-width:52px;color:#888">${p.id}</span>
+    <strong style="min-width:75px;color:#fff">${p.brand}</strong>
+    <span style="flex:1;color:#ddd">${p.name} <span style="color:#888">(${p.type}, ${p.nozzle}&deg;C / ${p.bed}&deg;C)</span></span>
+    <span style="font-size:11px;padding:2px 6px;border-radius:4px;background:${p.state==='modified'?'#422006':'#1e3a2f'};color:${p.state==='modified'?'#fbbf24':'#4ade80'}">${p.state==='modified'?'Modified in DB':'Not installed'}</span>
+  </label>`).join(''):'<div style="padding:14px;color:#86efac;font-size:13px">All 7 community presets are already installed and up to date in your printer database.</div>';
+  const empty=!list.length,pkAll=document.getElementById('pkAll'),bAdd=document.getElementById('btnAddSel');pkAll.checked=!empty;pkAll.disabled=empty;if(bAdd){bAdd.disabled=empty;bAdd.style.opacity=empty?'0.45':'1';bAdd.style.cursor=empty?'not-allowed':'pointer'}
+  document.getElementById('packModal').classList.add('open');
+}
+function closePackModal(){document.getElementById('packModal').classList.remove('open')}
+function toggleAllPacks(v){document.querySelectorAll('.pkCb').forEach(cb=>cb.checked=v)}
+async function installSelectedPacks(){
+  const ids=Array.from(document.querySelectorAll('.pkCb:checked')).map(cb=>cb.value);
+  if(!ids.length)return alert('Please select at least one preset.');
+  const r=await (await fetch('api/import_pack7',{method:'POST',body:JSON.stringify({ids})})).json();
+  if(!r.ok)return alert(r.error);
+  closePackModal();msg(`${r.added} preset(s) added`);load();
+}
+function runAction(v){
+  if(v==='orca')document.getElementById('orcaFile').click();
+  else if(v==='bat')window.location.href='api/download_bat';
+  else if(v==='backup')window.location.href='api/export';
+}
+let SETTINGS={allow_cf:false,allow_edit_stock:false};
+function openSettings(){document.getElementById('s_allow_cf').checked=!!SETTINGS.allow_cf;document.getElementById('s_edit_stock').checked=!!SETTINGS.allow_edit_stock;document.getElementById('setModal').classList.add('open')}
+function closeSettings(){document.getElementById('setModal').classList.remove('open')}
+async function saveSettings(){
+  const r=await (await fetch('api/settings',{method:'POST',body:JSON.stringify({settings:{allow_cf:document.getElementById('s_allow_cf').checked,allow_edit_stock:document.getElementById('s_edit_stock').checked}})})).json();
+  if(!r.ok)return alert(r.error);
+  SETTINGS=r.settings;closeSettings();applySettingsUI();render();msg('Settings saved');
+}
+function applySettingsUI(){
+  const sel=document.getElementById('f_type');
+  Array.from(sel.options).forEach(o=>{if(o.value.includes('-CF')||o.value.includes('-GF'))o.hidden=!SETTINGS.allow_cf});
+}
+let ITEMS=[];
+let SORT_COL='default',SORT_DIR=-1;
+function setSort(c){
+  if(SORT_COL===c)SORT_DIR*=-1;
+  else{SORT_COL=c;SORT_DIR=(c==='id'||c==='status')?-1:1}
+  render();
+}
+function sortRows(arr){
+  const cols='id status brand name type nozzle bed flow'.split(' ');
+  cols.forEach(k=>{const el=document.getElementById('srt_'+k);if(el)el.textContent=(SORT_COL===k)?(SORT_DIR===1?'▲':'▼'):''});
+  return arr.sort((a,b)=>{
+    if(SORT_COL==='default')return (b.custom-a.custom)||(Number(b.id)-Number(a.id));
+    let va,vb;
+    if(SORT_COL==='id'){va=Number(a.id)||0;vb=Number(b.id)||0}
+    else if(SORT_COL==='status'){va=(a.pending?2:(a.custom?1:0));vb=(b.pending?2:(b.custom?1:0))}
+    else if(SORT_COL==='nozzle'){va=parseFloat(a.nozzle_temp)||0;vb=parseFloat(b.nozzle_temp)||0}
+    else if(SORT_COL==='bed'){va=parseFloat(a.bed_temp)||0;vb=parseFloat(b.bed_temp)||0}
+    else if(SORT_COL==='flow'){va=parseFloat(a.max_vol)||0;vb=parseFloat(b.max_vol)||0}
+    else{va=String(a[SORT_COL]||'').toLowerCase();vb=String(b[SORT_COL]||'').toLowerCase()}
+    if(va<vb)return -1*SORT_DIR;
+    if(va>vb)return 1*SORT_DIR;
+    return (Number(a.id)||0)-(Number(b.id)||0);
+  });
+}
+
+const $=id=>document.getElementById(id);
+function msg(t){const el=$('toast');el.textContent=t;el.style.display='block';setTimeout(()=>el.style.display='none',3200)}
+async function load(){
+  const r=await (await fetch('api/materials')).json();
+  if(!r.ok)return alert(r.error);
+  ITEMS=r.items;SETTINGS=r.settings||SETTINGS;applySettingsUI();$('btnBak').style.display=r.has_backup?'inline-block':'none';const rb=$('rebootBanner');if(rb)rb.style.display=(r.pending_count>0)?'block':'none';
+  const brands=[...new Set(ITEMS.map(x=>x.brand))].sort();
+  const types=[...new Set(ITEMS.map(x=>x.type))].sort();
+  $('fBrand').innerHTML='<option value="">All Brands</option>'+brands.map(b=>`<option>${b}</option>`).join('');
+  $('fType').innerHTML='<option value="">All Types</option>'+types.map(t=>`<option>${t}</option>`).join('');
+  render();
+}
+function render(){
+  const q=$('q').value.toLowerCase(),fb=$('fBrand').value,ft=$('fType').value,fs=$('fScope').value;
+  const custCnt=ITEMS.filter(x=>x.custom).length;const st=$('dbStats');if(st)st.textContent=`${ITEMS.length} profiles in database (${custCnt} custom)`;const rows=sortRows(ITEMS.filter(x=>(!fb||x.brand===fb)&&(!ft||x.type===ft)&&(!fs||(fs==='custom'?x.custom:!x.custom))&&(!q||`${x.id} ${x.brand} ${x.name} ${x.type}`.toLowerCase().includes(q))));
+  $('tb').innerHTML=rows.map(x=>`<tr style="${x.pending?'background:#2b1d08;box-shadow:inset 3px 0 0 #f59e0b':''}">
+    <td><code>${x.id}</code></td>
+    <td><span class="tag ${x.custom?'t-cust':'t-stock'}">${x.custom?'Custom':'Stock'}</span>${x.pending?' <span class="tag" style="background:#422006;color:#fbbf24;border:1px solid #d97706">Pending Reboot</span>':(x.custom?' <span class="tag" style="background:#14532d;color:#86efac">Active</span>':'')}</td>
+    <td><b>${x.brand}</b></td><td>${x.name}</td><td>${x.type}</td>
+    <td>${x.nozzle_temp}°C</td><td>${x.bed_temp}°C</td><td>${x.max_vol} mm³/s</td>
+    <td style="display:flex;gap:6px">
+      ${(x.custom||SETTINGS.allow_edit_stock)?`<button onclick='openEdit(${JSON.stringify(x)},false)'>Edit</button>`:""}
+      <button onclick='openEdit(${JSON.stringify(x)},true)'>Clone</button>
+      ${x.custom?`<button class="del" onclick="delItem('${x.id}')">Delete</button>`:''}
+    </td></tr>`).join('');
+}
+function openNew(){$('mTitle').textContent='New Filament';$('f_id').value='';$('f_id').disabled=false;$('f_brand').value='';$('f_name').value='';$('modal').classList.add('open')}
+function openEdit(x,clone){
+  $('mTitle').textContent=clone?'Clone Filament':'Edit Filament';
+  $('f_id').value=clone?'':x.id;$('f_id').disabled=!clone&&!x.custom;
+  $('f_brand').value=x.brand;$('f_name').value=clone?x.name+' Copy':x.name;$('f_type').value=x.type;
+  $('f_noz').value=x.nozzle_temp;$('f_nozi').value=x.nozzle_init||x.nozzle_temp;$('f_bed').value=x.bed_temp;
+  $('f_vol').value=x.max_vol;$('f_dryt').value=x.dry_temp||55;$('f_dryh').value=x.dry_time||6;
+  $('modal').classList.add('open');
+}
+function closeM(){$('modal').classList.remove('open')}
+async function saveItem(){
+  const p={id:$('f_id').value,brand:$('f_brand').value,name:$('f_name').value,type:$('f_type').value,nozzle_temp:$('f_noz').value,nozzle_init:$('f_nozi').value,bed_temp:$('f_bed').value,max_vol:$('f_vol').value,dry_temp:$('f_dryt').value,dry_time:$('f_dryh').value};
+  const r=await (await fetch('api/save',{method:'POST',body:JSON.stringify(p)})).json();
+  if(!r.ok)return alert(r.error);closeM();msg('Saved (ID '+r.id+') – reload printer UI if needed');load();
+}
+async function delItem(id){if(!confirm('Delete entry '+id+'?'))return;await fetch('api/delete',{method:'POST',body:JSON.stringify({id})});msg('Deleted');load();}
+async function importOrca(fileList){
+  if(!fileList||!fileList.length)return;
+  const files=await Promise.all([...fileList].map(f=>f.text()));
+  let r=await (await fetch('api/import_orca',{method:'POST',body:JSON.stringify({files,allow_cf:false})})).json();
+  if(!r.ok)return alert(r.error);
+  if(r.skipped_cf&&r.skipped_cf.length&&!SETTINGS.allow_cf){alert('Skipped abrasive CF/GF filament(s): '+r.skipped_cf.join(', ')+'.\nEnable "Include abrasive CF/GF materials" in Settings if needed.')}else if(r.skipped_cf&&r.skipped_cf.length&&confirm('Abrasive CF/GF filament(s) detected: '+r.skipped_cf.join(', ')+'.\nDo NOT use CF filaments in CFS-C! Import anyway?')){
+    r=await (await fetch('api/import_orca',{method:'POST',body:JSON.stringify({files,allow_cf:true})})).json();
+  }
+  $('orcaFile').value='';
+  msg(`OrcaSlicer import: ${r.added} added, ${r.updated} updated`);load();
+}
+async function importPack7(){const r=await (await fetch('api/import_pack7',{method:'POST'})).json();msg(r.added+' custom presets imported!');load();}
+async function restoreBak(){if(!confirm('Restore original material_database.json (.bak)?'))return;await fetch('api/restore_backup',{method:'POST'});msg('Original database restored');load();}
+load();
+</script>
+</body>
+</html>

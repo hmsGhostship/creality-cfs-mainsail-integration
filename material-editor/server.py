@@ -288,7 +288,62 @@ def sync_all_targets(data):
             con.close()
 
 SETTINGS_PATH = os.path.join(WEB_ROOT, "settings.json")
-DEFAULT_SETTINGS = {"allow_cf": False, "allow_edit_stock": False}
+DEFAULT_SETTINGS = {"allow_cf": False, "allow_edit_stock": False, "spoolman_host": "", "spoolman_port": 7912}
+
+def _sm_url(cfg, b=None):
+    b = b or {}
+    h = str(b.get("spoolman_host", cfg.get("spoolman_host", "")) or "").strip().replace("http://","").replace("https://","").split("/")[0].strip()
+    pt = str(b.get("spoolman_port", cfg.get("spoolman_port", 7912)) or "7912").strip()
+    if ":" in h: h, pt = h.rsplit(":", 1)
+    if not h: raise ValueError("Spoolman Host/IP not set in Settings")
+    return f"http://{h}:{pt}/api/v1"
+
+def _sm_req(u, path, method="GET", body=None):
+    import urllib.request
+    d = json.dumps(body).encode("utf-8") if body is not None else None
+    r = urllib.request.Request(u + path, data=d, method=method)
+    if d is not None: r.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(r, timeout=8) as resp:
+        raw = resp.read().decode("utf-8")
+        return json.loads(raw) if raw else {}
+
+def spoolman_preview(body=None):
+    u = _sm_url(load_settings(), body)
+    exist = {(str((f.get("vendor") or {}).get("name","")).strip().lower(), str(f.get("name","")).strip().lower()) for f in _sm_req(u, "/filament")}
+    out = []
+    for it in load_db().get("result", {}).get("list", []):
+        b, kv = it.get("base", {}), it.get("kvParam", {})
+        pid = str(b.get("id", "")).strip()
+        br = str(b.get("brand") or kv.get("filament_vendor") or "Generic").strip()
+        nm = str(b.get("name") or "PLA").strip()
+        out.append({"id": pid, "custom": pid.isdigit() and int(pid) >= 90000, "brand": br, "name": nm, "type": str(b.get("meterialType") or "PLA"), "nozzle": str(kv.get("nozzle_temperature") or "210"), "bed": str(kv.get("textured_plate_temp") or "60"), "exists": (br.lower(), nm.lower()) in exist})
+    return out
+
+def sync_to_spoolman(ids=None, body=None):
+    u = _sm_url(load_settings(), body)
+    sel = {str(x).strip() for x in (ids or [])}
+    if not sel: return {"added": 0, "updated": 0}
+    vendors = {str(v.get("name","")).strip().lower(): v.get("id") for v in _sm_req(u, "/vendor")}
+    exist_map = {(str((f.get("vendor") or {}).get("name","")).strip().lower(), str(f.get("name","")).strip().lower()): f.get("id") for f in _sm_req(u, "/filament")}
+    added = updated = 0
+    for it in load_db().get("result", {}).get("list", []):
+        b, kv = it.get("base", {}), it.get("kvParam", {})
+        pid = str(b.get("id", "")).strip()
+        if pid not in sel: continue
+        br = str(b.get("brand") or kv.get("filament_vendor") or "Generic").strip()
+        nm = str(b.get("name") or "PLA").strip()
+        vid = vendors.get(br.lower()) or _sm_req(u, "/vendor", "POST", {"name": br}).get("id")
+        vendors[br.lower()] = vid
+        payload = {"name": nm, "vendor_id": vid, "material": str(b.get("meterialType") or "PLA"), "density": float(b.get("density") or 1.24), "diameter": float(b.get("diameter") or 1.75), "weight": 1000, "spool_weight": 200, "settings_extruder_temp": int(float(kv.get("nozzle_temperature") or 210)), "settings_bed_temp": int(float(kv.get("textured_plate_temp") or 60)), "comment": f"Creality DB ID: {pid}"}
+        fid = exist_map.get((br.lower(), nm.lower()))
+        if fid:
+            _sm_req(u, f"/filament/{fid}", "PATCH", payload)
+            updated += 1
+        else:
+            res_f = _sm_req(u, "/filament", "POST", payload)
+            exist_map[(br.lower(), nm.lower())] = res_f.get("id")
+            added += 1
+    return {"added": added, "updated": updated}
 
 PENDING_FILE = "/tmp/cfs_editor_pending.json"
 
@@ -332,8 +387,9 @@ def save_db(data):
     ensure_backup()
     try:
         res = data.setdefault("result", {})
-        cur_v = int(res.get("version", 0) or 0)
-        res["version"] = max(cur_v + 1, int(__import__("time").time()))
+        cur_v = int(str(res.get("version", 0) or 0))
+        res["count"] = len(res.get("list", []))
+        res["version"] = str(max(cur_v + 1, int(__import__("time").time())))
     except Exception:
         pass
     fd, tmp_path = tempfile.mkstemp(prefix=".matdb_", suffix=".tmp", dir=os.path.dirname(DB_PATH))
@@ -591,6 +647,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, "added": added, "updated": updated, "skipped_cf": skipped_cf})
             elif p == "/api/settings":
                 self._send_json(200, {"ok": True, "settings": save_settings(body.get("settings", body))})
+            elif p == "/api/spoolman_test":
+                info = _sm_req(_sm_url(load_settings(), body), "/info")
+                self._send_json(200, {"ok": True, "version": info.get("version", "ok")})
+            elif p == "/api/spoolman_preview":
+                self._send_json(200, {"ok": True, "items": spoolman_preview(body)})
+            elif p == "/api/spoolman_sync":
+                self._send_json(200, {"ok": True, **sync_to_spoolman(body.get("ids"), body)})
             elif p == "/api/restore_backup":
                 shutil.copy2(BACKUP_PATH, DB_PATH)
                 self._send_json(200, {"ok": True})

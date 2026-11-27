@@ -1,11 +1,17 @@
 #!/bin/sh
-if [ -d "/usr/apps/etc/init.d" ] && [ -w "/usr/apps/etc/init.d" ]; then EDITOR_SVC="/usr/apps/etc/init.d/S99cfs_material_editor"; else EDITOR_SVC="/etc/init.d/S99cfs_material_editor"; fi
 set -eu
+
+if [ -d "/usr/apps/etc/init.d" ] && [ -w "/usr/apps/etc/init.d" ]; then
+  INITD_DIR="/usr/apps/etc/init.d"
+else
+  INITD_DIR="/etc/init.d"
+fi
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 INJECT_START="<!-- K1C_CFS_INJECT_START -->"
 INJECT_END="<!-- K1C_CFS_INJECT_END -->"
-INIT_SCRIPT="/etc/init.d/S59k1c_cfs_mini"
+INIT_SCRIPT="$INITD_DIR/S59k1c_cfs_mini"
+EDITOR_SVC="$INITD_DIR/S99cfs_material_editor"
 PANEL_JS_SOURCE="${PANEL_JS_SOURCE:-$SCRIPT_DIR/static/mainsail-panel.js}"
 MAINSAIL_HTML="${MAINSAIL_HTML:-/usr/data/mainsail/index.html}"
 MAINSAIL_BACKUP_HTML="${MAINSAIL_BACKUP_HTML:-/usr/data/mainsail/index.html.k1c-cfs-mini.bak}"
@@ -196,7 +202,7 @@ install_material_editor() {
   mkdir -p /usr/data/cfs-material-editor
   cp -f "$SCRIPT_DIR/material-editor/server.py" /usr/data/cfs-material-editor/server.py
   cp -f "$SCRIPT_DIR/material-editor/index.html" /usr/data/cfs-material-editor/index.html
-  cat << 'EOF_SVC' > $EDITOR_SVC
+  cat << 'EOF_SVC' > "$EDITOR_SVC"
 #!/bin/sh
 PID_FILE="/var/run/cfs_material_editor.pid"
 PY_BIN="/usr/data/moonraker-env/bin/python"
@@ -218,8 +224,8 @@ case "$1" in
     ;;
 esac
 EOF_SVC
-  chmod +x $EDITOR_SVC
-  $EDITOR_SVC restart >/dev/null 2>&1 || true
+  chmod +x "$EDITOR_SVC"
+  "$EDITOR_SVC" restart >/dev/null 2>&1 || true
 
   NGINX_CFG="/usr/data/nginx/nginx/nginx.conf"
   if [ -f "$NGINX_CFG" ] && ! grep -q "location /cfs-gate/" "$NGINX_CFG"; then
@@ -254,9 +260,9 @@ PY_NGINX
 }
 
 remove_material_editor() {
-  if [ -x $EDITOR_SVC ]; then
-    $EDITOR_SVC stop >/dev/null 2>&1 || true
-    rm -f $EDITOR_SVC
+  if [ -x "$EDITOR_SVC" ]; then
+    "$EDITOR_SVC" stop >/dev/null 2>&1 || true
+    rm -f "$EDITOR_SVC"
   fi
   rm -rf /usr/data/cfs-material-editor
   NGINX_CFG="/usr/data/nginx/nginx/nginx.conf"
@@ -448,7 +454,8 @@ remove_installation() {
     printf 'No frontend backups found.\n'
   fi
   printf 'Step 2: removing autostart file\n'
-  rm -f "$INIT_SCRIPT"
+  rm -f "$INIT_SCRIPT" "/etc/init.d/S59k1c_cfs_mini" "/usr/apps/etc/init.d/S59k1c_cfs_mini"
+  remove_material_editor
   printf 'Step 3: removing Klipper include\n'
   remove_printer_include
   printf 'Step 4: removing local files\n'

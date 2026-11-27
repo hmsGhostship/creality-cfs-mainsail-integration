@@ -1,39 +1,91 @@
 
-import re as _re, urllib.request as _ureq
+import json, os, sqlite3, re as _re, urllib.request as _ureq
 
-_PENDING_ORCA_PRINT = {"filename": "", "enabled": True}
+_GATE_STATE_FILE = "/usr/data/printer_data/database/cfs_gate_state.json"
+def _load_gate_enabled():
+    try:
+        with open(_GATE_STATE_FILE, "r", encoding="utf-8") as f:
+            return bool(json.load(f).get("enabled", True))
+    except Exception:
+        return True
 
+def _save_gate_enabled(val):
+    try:
+        os.makedirs(os.path.dirname(_GATE_STATE_FILE), exist_ok=True)
+        with open(_GATE_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"enabled": bool(val)}, f)
+    except Exception:
+        pass
+
+_PENDING_ORCA_PRINT = {"filename": "", "enabled": _load_gate_enabled()}
+
+
+def _cfs_color_to_hex(val):
+    if isinstance(val, int):
+        return f"{val & 0xFFFFFF:06X}"
+    s = str(val or "").strip().lstrip("#").upper()
+    if s.isdigit():
+        return f"{int(s) & 0xFFFFFF:06X}"
+    s = _re.sub(r"[^0-9A-F]", "", s)
+    return s[-6:] if len(s) >= 6 else ""
 
 def _cfs_has_matching_materials(gcode_bytes):
     try:
-        head = gcode_bytes[:65536].decode("utf-8", errors="ignore")
-        types = []
+        head = (gcode_bytes[:131072] + b"\\n" + gcode_bytes[-131072:]).decode("utf-8", errors="ignore")
+        types, colors, used_mm = [], [], []
         for line in head.splitlines():
             if line.startswith("; filament_type ="):
-                types = [t.strip().upper().replace("-", "") for t in line.split("=", 1)[1].split(";") if t.strip()]
-                break
-        used = sorted({int(m.group(1)) for m in _re.finditer(r'(?m)^T([0-3])\b', gcode_bytes[:262144].decode("utf-8", errors="ignore"))})
+                types = [t.strip().upper().replace("-", "") for t in line.split("=", 1)[1].split(";")]
+            elif line.startswith("; filament_colour =") or line.startswith("; extruder_colour ="):
+                if not colors:
+                    colors = [_cfs_color_to_hex(c) for c in line.split("=", 1)[1].split(";")]
+            elif line.startswith("; filament_used_mm ="):
+                used_mm = [float(x.strip() or 0) for x in line.split("=", 1)[1].split(";")]
+        used = [i for i, mm in enumerate(used_mm) if mm > 0.01]
+        if not used:
+            used = sorted({int(m.group(1)) for m in _re.finditer(r'(?m)^T([0-3])', head)})
         if not used:
             used = [0]
-        req_mats = []
+        def _base_mat(m):
+            u = _re.sub(r"[^A-Z0-9]", "", str(m or "").upper())
+            for pr in ("PLACF", "PETGCF", "PACF", "PLA", "PETG", "ABS", "ASA", "TPU"):
+                if u.startswith(pr):
+                    return pr
+            return u
+        def _rgb(h):
+            h = _cfs_color_to_hex(h)
+            return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)) if len(h) == 6 else None
+        def _cmatch(c1, c2):
+            a, b = _rgb(c1), _rgb(c2)
+            return True if (not a or not b) else (abs(a[0] - b[0]) <= 35 and abs(a[1] - b[1]) <= 35 and abs(a[2] - b[2]) <= 35)
+        reqs = []
         for t in used:
-            m = types[t] if t < len(types) else (types[0] if types else "")
+            m = types[t].strip() if t < len(types) and types[t].strip() else (types[0].strip() if types else "")
+            c = colors[t] if t < len(colors) else (colors[0] if colors else "")
             if m:
-                req_mats.append(m)
-        if not req_mats:
+                reqs.append((_base_mat(m), c))
+        if not reqs:
             return True
         con = sqlite3.connect("/usr/data/printer_data/database/nexusp-sql.db")
         row = con.execute("SELECT value FROM namespace_store WHERE namespace='color_box' AND key='box_info'").fetchone()
         con.close()
         if not row:
             return False
-        slots = json.loads(row[0]).get("T1", {}).get("list", [])
-        avail = [str(s.get("type", "")).strip().upper().replace("-", "") for s in slots if s.get("enable") == 1 and str(s.get("type", "")).strip()]
+        raw_boxes = json.loads(row[0])
+        avail = []
+        for bid in sorted(raw_boxes.keys()):
+            bdata = raw_boxes.get(bid)
+            if not isinstance(bdata, dict):
+                continue
+            for sl in bdata.get("list", []):
+                if sl.get("enable") == 1 and str(sl.get("type", "")).strip():
+                    avail.append((_base_mat(sl.get("type", "")), _cfs_color_to_hex(sl.get("color", ""))))
         pool = list(avail)
-        for rm in req_mats:
-            if rm in pool:
-                pool.remove(rm)
-            elif rm in avail:
+        for rm, rc in reqs:
+            hit = next((i for i, (am, ac) in enumerate(pool) if am == rm and _cmatch(rc, ac)), None)
+            if hit is not None:
+                pool.pop(hit)
+            elif any(am == rm and _cmatch(rc, ac) for am, ac in avail):
                 pass
             else:
                 return False
@@ -41,14 +93,78 @@ def _cfs_has_matching_materials(gcode_bytes):
     except Exception:
         return True
 
+
+
+def _sanitize_obj_ascii(raw_name):
+    import unicodedata
+    s = raw_name.strip().strip('"').strip("'")
+    for k, v in (("ä","ae"),("ö","oe"),("ü","ue"),("Ä","Ae"),("Ö","Oe"),("Ü","Ue"),("ß","ss")):
+        s = s.replace(k, v)
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    s = _re.sub(r"[^A-Za-z0-9_-]+", "_", s).strip("_")
+    return s or "object"
+
+def _sanitize_gcode_bytes(raw_bytes):
+    try:
+        txt = raw_bytes.decode("utf-8", errors="replace")
+        pat = _re.compile(r'(?m)^((?:EXCLUDE_OBJECT(?:_DEFINE|_START|_END)?)\b[^\r\n]*?\bNAME=)("[^"]*"|\S+)')
+        new_txt = pat.sub(lambda m: m.group(1) + _sanitize_obj_ascii(m.group(2)), txt)
+        if new_txt != txt:
+            return new_txt.encode("utf-8")
+    except Exception:
+        pass
+    return raw_bytes
+
+
+def _start_gcode_ascii_watcher():
+    import threading, time
+    def _loop():
+        seen = {}
+        gdir = "/usr/data/printer_data/gcodes"
+        while True:
+            try:
+                if os.path.isdir(gdir):
+                    for fn in os.listdir(gdir):
+                        if not fn.lower().endswith((".gcode", ".gco", ".g")):
+                            continue
+                        fp = os.path.join(gdir, fn)
+                        try:
+                            st = os.stat(fp)
+                        except Exception:
+                            continue
+                        sig = (st.st_mtime_ns, st.st_size)
+                        if seen.get(fp) == sig:
+                            continue
+                        with open(fp, "rb") as f:
+                            raw = f.read()
+                        clean = _sanitize_gcode_bytes(raw)
+                        if clean != raw:
+                            tmp = fp + ".tmp_ascii"
+                            with open(tmp, "wb") as f:
+                                f.write(clean)
+                            os.replace(tmp, fp)
+                            st = os.stat(fp)
+                            sig = (st.st_mtime_ns, st.st_size)
+                        seen[fp] = sig
+            except Exception:
+                pass
+            time.sleep(0.4)
+    t = threading.Thread(target=_loop, daemon=True)
+    t.start()
+
 def _forward_upload_no_autoprint(handler, target_path="/server/files/upload"):
+    from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
     ctype = handler.headers.get("Content-Type", "")
     clen = int(handler.headers.get("Content-Length", "0") or "0")
     body = handler.rfile.read(clen)
-    m = _re.search(r'boundary=([^;]+)', ctype)
-    want_print = False
+    sp = urlsplit(handler.path or target_path)
+    qs = parse_qs(sp.query, keep_blank_values=True)
+    q_print = any(v.strip().lower() in ("true", "1", "yes") for v in qs.get("print", []))
+    want_print = q_print
     uploaded_name = ""
     gcode_bytes = b""
+    should_intercept = _PENDING_ORCA_PRINT.get("enabled", True)
+    m = _re.search(r'boundary=([^;]+)', ctype)
     if m:
         boundary = m.group(1).strip().strip('"').encode("utf-8")
         delim = b"--" + boundary
@@ -61,7 +177,14 @@ def _forward_upload_no_autoprint(handler, target_path="/server/files/upload"):
             fn_m = _re.search(r'filename="([^"]+)"', hdr_str)
             if fn_m:
                 uploaded_name = fn_m.group(1)
-                gcode_bytes = val[:-2] if val.endswith(b"\r\n") else val
+                raw_val = val[:-2] if val.endswith(b"\r\n") else val
+                if uploaded_name.lower().endswith((".gcode", ".gco", ".g")):
+                    raw_val = _sanitize_gcode_bytes(raw_val)
+                    val = raw_val + (b"\r\n" if val.endswith(b"\r\n") else b"")
+                gcode_bytes = raw_val
+            if 'name="print"' in hdr_str:
+                if val.rstrip(b"\r\n").strip().lower() in (b"true", b"1", b"yes"):
+                    want_print = True
         should_intercept = _PENDING_ORCA_PRINT.get("enabled", True) or (not _cfs_has_matching_materials(gcode_bytes))
         new_parts = []
         for part in parts:
@@ -71,20 +194,21 @@ def _forward_upload_no_autoprint(handler, target_path="/server/files/upload"):
             hdr_raw, val = part.split(b"\r\n\r\n", 1)
             hdr_str = hdr_raw.decode("utf-8", errors="ignore")
             if 'name="print"' in hdr_str:
-                if val.rstrip(b"\r\n").strip().lower() in (b"true", b"1", b"yes"):
-                    if should_intercept:
-                        want_print = True
-                        val = b"false\r\n"
+                if want_print and should_intercept:
+                    val = b"false\r\n"
                 new_parts.append(hdr_raw + b"\r\n\r\n" + val)
             else:
                 new_parts.append(part)
         body = delim.join(new_parts)
-    req = _ureq.Request("http://localhost:7126" + target_path, data=body, method="POST")
+    if q_print and should_intercept:
+        qs["print"] = ["false"]
+    fwd_path = urlunsplit(("", "", sp.path or target_path, urlencode(qs, doseq=True), ""))
+    req = _ureq.Request("http://localhost:7126" + fwd_path, data=body, method="POST")
     if ctype:
         req.add_header("Content-Type", ctype)
     with _ureq.urlopen(req, timeout=60) as resp:
         st, rbody, rct = resp.status, resp.read(), resp.headers.get("Content-Type", "application/json")
-    if want_print and st in (200, 201):
+    if want_print and should_intercept and st in (200, 201):
         try:
             rj = json.loads(rbody.decode("utf-8", errors="ignore"))
             fn = rj.get("item", {}).get("path") or uploaded_name
@@ -245,9 +369,45 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if urlparse(self.path).path == "/cfs-gate/slots":
+            try:
+                con = sqlite3.connect("/usr/data/printer_data/database/nexusp-sql.db")
+                row = con.execute("SELECT value FROM namespace_store WHERE namespace='color_box' AND key='box_info'").fetchone()
+                con.close()
+                raw = json.loads(row[0]) if row else {}
+                out = []
+                for bid in sorted(raw.keys()):
+                    bnum = bid.lstrip("T") or "1"
+                    for idx, sl in enumerate(raw.get(bid, {}).get("list", [])):
+                        if sl.get("enable") == 1 and str(sl.get("type", "")).strip():
+                            col = _cfs_color_to_hex(sl.get("color", "")) or "9CA3AF"
+                            out.append({"id": f"{bnum}{chr(65+idx)}", "mat": str(sl.get("type", "")).strip(), "col": f"#{col}", "nc": col})
+                self._send_json(200, {"slots": out})
+            except Exception as e:
+                self._send_json(200, {"slots": []})
+            return
         if urlparse(self.path).path == "/cfs-gate/pending":
             fn = _PENDING_ORCA_PRINT.get("filename", "")
             self._send_json(200, {"filename": fn})
+            return
+        if urlparse(self.path).path == "/cfs-gate/check":
+            from urllib.parse import parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            fn = (qs.get("filename") or [""]).pop(0)
+            gpath = os.path.join("/usr/data/printer_data/gcodes", fn.lstrip("/"))
+            try:
+                with open(gpath, "rb") as gf:
+                    head = gf.read(65536)
+                    gf.seek(0, os.SEEK_END)
+                    sz = gf.tell()
+                    tail = b""
+                    if sz > 65536:
+                        gf.seek(max(0, sz - 65536))
+                        tail = gf.read(65536)
+                matched = _cfs_has_matching_materials(head + b"\n" + tail)
+            except Exception:
+                matched = True
+            self._send_json(200, {"match": bool(matched), "enabled": _PENDING_ORCA_PRINT.get("enabled", True)})
             return
         p = urlparse(self.path).path
         if p == "/api/materials":
@@ -325,6 +485,7 @@ class Handler(BaseHTTPRequestHandler):
             cl = int(self.headers.get("Content-Length", "0") or "0")
             body = json.loads(self.rfile.read(cl).decode("utf-8") or "{}")
             _PENDING_ORCA_PRINT["enabled"] = bool(body.get("enabled", True))
+            _save_gate_enabled(_PENDING_ORCA_PRINT["enabled"])
             self._send_json(200, {"ok": True, "enabled": _PENDING_ORCA_PRINT["enabled"]})
             return
         p = urlparse(self.path).path
@@ -430,4 +591,5 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(500, {"ok": False, "error": str(e)})
 
 if __name__ == "__main__":
+    _start_gcode_ascii_watcher()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

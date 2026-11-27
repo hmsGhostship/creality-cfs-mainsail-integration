@@ -261,7 +261,19 @@ window.openMapAndPrintModal = async function(prefillPath = "", fromAutoTrigger =
         const tc = h.length === 6 && (parseInt(h.slice(0,2),16)*299 + parseInt(h.slice(2,4),16)*587 + parseInt(h.slice(4,6),16)*114)/1000 > 145 ? "#111827" : "#ffffff";
         return { t, mat, nm: normMat(mat), col, nc: h, tc };
       });
-      render(list, getLoadedSlots());
+      let loaded = getLoadedSlots();
+      if (!loaded.length) {
+        try {
+          const sr = await fetch("/cfs-gate/slots", { cache: "no-store" });
+          if (sr.ok) {
+            const sj = await sr.json();
+            (sj.slots || []).forEach((sl) => {
+              loaded.push({ id: sl.id, mat: sl.mat, rem: "", nm: normMat(sl.mat), col: sl.col, nc: sl.nc });
+            });
+          }
+        } catch (e) {}
+      }
+      render(list, loaded);
     } catch (err) {
       cardsEl.innerHTML = `<div style="color:#ef4444;font-size:13px;">Fehler: ${err.message}</div>`;
     }

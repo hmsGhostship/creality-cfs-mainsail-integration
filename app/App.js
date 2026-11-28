@@ -10,6 +10,7 @@ import {
   Animated,
   AppState,
   Image,
+  Linking,
   PanResponder,
   Pressable,
   SafeAreaView,
@@ -592,6 +593,15 @@ function AppContent() {
     navigate({ name: "printers" });
   }
 
+  function openMaterialDb() {
+    if (!activePrinter?.host) return;
+    const rawHost = String(activePrinter.host).trim().replace(/^https?:\/\//i, "").split(":")[0].split("/")[0];
+    const url = `http://${rawHost}:8088`;
+    Linking.openURL(url).catch(() => {
+      Alert.alert("Material DB", `Could not open ${url}`);
+    });
+  }
+
   function openPrinter(printer) {
     setActivePrinterId(printer.id);
     setSelectedSlot("");
@@ -1003,7 +1013,9 @@ function AppContent() {
                   <Text style={styles.printerHeaderIp}>{activePrinter?.host || ""}</Text>
                 </View>
 
-                <View style={styles.backCircleGhost} />
+                <Pressable style={styles.dbCircle} onPress={openMaterialDb}>
+                  <Text style={styles.dbCircleText}>DB</Text>
+                </Pressable>
               </View>
 
               <View style={styles.compactStatsRow}>
@@ -1601,6 +1613,18 @@ const styles = StyleSheet.create({
   },
   backCircleText: { color: "#d4d4d8", fontSize: 28, lineHeight: 30, marginTop: -2 },
   backCircleGhost: { width: 40, height: 40 },
+  dbCircle: {
+    minWidth: 44,
+    height: 40,
+    borderRadius: 999,
+    backgroundColor: "#18181b",
+    borderWidth: 1,
+    borderColor: "#3b82f6",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10
+  },
+  dbCircleText: { color: "#60a5fa", fontSize: 12, fontWeight: "900", letterSpacing: 0.5 },
   saveCircle: {
     minWidth: 58,
     height: 40,

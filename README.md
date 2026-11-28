@@ -100,12 +100,18 @@ The repository packages an Expo-based smartphone application located inside the 
 * Establish direct, real-time WebSocket communication with your printer.
 * Select spool colors manually or capture them accurately using your phone's camera.
 
-**Running the App:**
-```sh
-cd /usr/data/creality-cfs-mainsail-integration/app
+**Running the App (on your PC / Mac):**
+
+```bash
+cd creality-cfs-mainsail-integration/app
 npm install
 npm start
 ```
+
+> **WSL2 / Firewall / iOS Tip:** If your phone cannot connect directly over LAN (e.g. when running inside WSL2 NAT), start the server in tunnel mode instead (requires a free Expo account via `npx expo login` on PC and in Expo Go):
+> ```bash
+> npm run tunnel
+> ```
 Once the bundler finishes initializing, scan the generated terminal QR code using the **Expo Go** application on your smartphone.
 
 ---

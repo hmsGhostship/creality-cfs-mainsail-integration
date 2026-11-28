@@ -1013,9 +1013,7 @@ function AppContent() {
                   <Text style={styles.printerHeaderIp}>{activePrinter?.host || ""}</Text>
                 </View>
 
-                <Pressable style={styles.dbCircle} onPress={openMaterialDb}>
-                  <Text style={styles.dbCircleText}>DB</Text>
-                </Pressable>
+                <View style={styles.backCircleGhost} />
               </View>
 
               <View style={styles.compactStatsRow}>
@@ -1042,6 +1040,11 @@ function AppContent() {
                   </View>
                 </View>
               </View>
+
+              <Pressable style={styles.materialDbButton} onPress={openMaterialDb}>
+                <Text style={styles.materialDbButtonIcon}>🗄️</Text>
+                <Text style={styles.materialDbButtonText}>Open Material DB</Text>
+              </Pressable>
 
               <View style={styles.filamentsHeaderRow}>
                 <Text style={styles.sectionLabel}>Filaments</Text>
@@ -1613,18 +1616,21 @@ const styles = StyleSheet.create({
   },
   backCircleText: { color: "#d4d4d8", fontSize: 28, lineHeight: 30, marginTop: -2 },
   backCircleGhost: { width: 40, height: 40 },
-  dbCircle: {
-    minWidth: 44,
-    height: 40,
-    borderRadius: 999,
-    backgroundColor: "#18181b",
+  materialDbButton: {
+    backgroundColor: "rgba(37,99,235,0.14)",
     borderWidth: 1,
     borderColor: "#3b82f6",
+    borderRadius: 18,
+    minHeight: 50,
+    marginBottom: 20,
+    paddingHorizontal: 18,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 10
+    gap: 10
   },
-  dbCircleText: { color: "#60a5fa", fontSize: 12, fontWeight: "900", letterSpacing: 0.5 },
+  materialDbButtonIcon: { fontSize: 17 },
+  materialDbButtonText: { color: "#60a5fa", fontSize: 15, fontWeight: "900", letterSpacing: 0.3 },
   saveCircle: {
     minWidth: 58,
     height: 40,
